@@ -1,0 +1,1405 @@
+openapi: 3.0.0
+info:
+  title: Cricket Box API
+  version: 1.0.0
+  description: |
+    ## Cricket Box - Digital Box Cricket Management Platform
+    
+    Complete API documentation for Cricket Box backend system.
+    
+    ### Features
+    - User Authentication (Email/Password & OTP)
+    - Room Management
+    - Team Setup
+    - Live Match Scoring
+    - Statistics & Leaderboards
+    - Admin Dashboard
+    
+  contact:
+    name: Cricket Box Support
+    email: support@cricketbox.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Development server
+  - url: https://api.cricketbox.com/api/v1
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Users
+    description: User management and statistics
+  - name: Rooms
+    description: Match room management
+  - name: Matches
+    description: Match management and live scoring
+  - name: Admin
+    description: Administrative operations
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Enter JWT token
+
+  schemas:
+    # User Schemas
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: objectId
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        fullName:
+          type: string
+        avatar:
+          type: string
+          format: uri
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [admin, host, player, umpire, viewer]
+        status:
+          type: string
+          enum: [active, inactive, blocked, pending_verification]
+        isEmailVerified:
+          type: boolean
+        statistics:
+          $ref: '#/components/schemas/UserStatistics'
+        createdAt:
+          type: string
+          format: date-time
+
+    UserStatistics:
+      type: object
+      properties:
+        matchesPlayed:
+          type: integer
+          default: 0
+        matchesWon:
+          type: integer
+          default: 0
+        matchesLost:
+          type: integer
+          default: 0
+        totalRuns:
+          type: integer
+          default: 0
+        totalBallsFaced:
+          type: integer
+          default: 0
+        highestScore:
+          type: integer
+          default: 0
+        centuries:
+          type: integer
+          default: 0
+        fifties:
+          type: integer
+          default: 0
+        fours:
+          type: integer
+          default: 0
+        sixes:
+          type: integer
+          default: 0
+        notOuts:
+          type: integer
+          default: 0
+        totalWickets:
+          type: integer
+          default: 0
+        totalOversBowled:
+          type: number
+          default: 0
+        totalRunsConceded:
+          type: integer
+          default: 0
+        catches:
+          type: integer
+          default: 0
+        runOuts:
+          type: integer
+          default: 0
+        stumpings:
+          type: integer
+          default: 0
+
+    # Auth Schemas
+    RegisterRequest:
+      type: object
+      required:
+        - username
+        - email
+        - password
+        - confirmPassword
+        - firstName
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+          pattern: '^[a-zA-Z0-9_]+$'
+          example: john_doe
+        email:
+          type: string
+          format: email
+          example: john@example.com
+        password:
+          type: string
+          minLength: 8
+          example: Password@123
+        confirmPassword:
+          type: string
+          example: Password@123
+        firstName:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: John
+        lastName:
+          type: string
+          maxLength: 50
+          example: Doe
+        phone:
+          type: string
+          example: "+1234567890"
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: john@example.com
+        password:
+          type: string
+          example: Password@123
+
+    TokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
+    OTPRequest:
+      type: object
+      required:
+        - email
+        - otp
+      properties:
+        email:
+          type: string
+          format: email
+        otp:
+          type: string
+          minLength: 6
+          maxLength: 6
+          example: "123456"
+
+    # Room Schemas
+    Room:
+      type: object
+      properties:
+        id:
+          type: string
+          format: objectId
+        name:
+          type: string
+        code:
+          type: string
+          minLength: 6
+          maxLength: 6
+        description:
+          type: string
+        host:
+          $ref: '#/components/schemas/User'
+        status:
+          type: string
+          enum: [waiting, team_setup, ready, in_match, completed, closed]
+        settings:
+          $ref: '#/components/schemas/RoomSettings'
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Participant'
+        guestParticipants:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuestParticipant'
+        teamA:
+          $ref: '#/components/schemas/Team'
+        teamB:
+          $ref: '#/components/schemas/Team'
+        umpire:
+          $ref: '#/components/schemas/Umpire'
+        currentMatch:
+          type: string
+          format: objectId
+        createdAt:
+          type: string
+          format: date-time
+
+    RoomSettings:
+      type: object
+      properties:
+        overs:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 6
+        playersPerTeam:
+          type: integer
+          minimum: 2
+          maximum: 11
+          default: 6
+        maxParticipants:
+          type: integer
+          minimum: 2
+          maximum: 30
+          default: 20
+        isPrivate:
+          type: boolean
+          default: false
+        allowGuests:
+          type: boolean
+          default: true
+        wideRuns:
+          type: integer
+          default: 1
+        noBallRuns:
+          type: integer
+          default: 1
+        noBallFreehit:
+          type: boolean
+          default: true
+
+    Participant:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        joinedAt:
+          type: string
+          format: date-time
+        isReady:
+          type: boolean
+
+    GuestParticipant:
+      type: object
+      properties:
+        name:
+          type: string
+        guestId:
+          type: string
+        joinedAt:
+          type: string
+          format: date-time
+        isReady:
+          type: boolean
+
+    Team:
+      type: object
+      properties:
+        name:
+          type: string
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamPlayer'
+
+    TeamPlayer:
+      type: object
+      properties:
+        user:
+          type: string
+          format: objectId
+        isGuest:
+          type: boolean
+        guestName:
+          type: string
+        guestId:
+          type: string
+        isCaptain:
+          type: boolean
+
+    Umpire:
+      type: object
+      properties:
+        user:
+          type: string
+          format: objectId
+        isGuest:
+          type: boolean
+        guestName:
+          type: string
+        guestId:
+          type: string
+
+    CreateRoomRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 50
+          example: "Weekend Cricket"
+        description:
+          type: string
+          maxLength: 500
+          example: "Friendly match"
+        settings:
+          type: object
+          properties:
+            overs:
+              type: integer
+              example: 6
+            playersPerTeam:
+              type: integer
+              example: 6
+            isPrivate:
+              type: boolean
+              example: false
+            password:
+              type: string
+              example: "secret123"
+
+    JoinRoomRequest:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          minLength: 6
+          maxLength: 6
+          example: "ABC123"
+        password:
+          type: string
+          example: "secret123"
+
+    # Match Schemas
+    Match:
+      type: object
+      properties:
+        id:
+          type: string
+          format: objectId
+        room:
+          type: string
+          format: objectId
+        matchNumber:
+          type: integer
+        status:
+          type: string
+          enum: [scheduled, toss, in_progress, innings_break, completed, abandoned, cancelled]
+        settings:
+          $ref: '#/components/schemas/MatchSettings'
+        teamA:
+          $ref: '#/components/schemas/Team'
+        teamB:
+          $ref: '#/components/schemas/Team'
+        toss:
+          $ref: '#/components/schemas/Toss'
+        umpire:
+          $ref: '#/components/schemas/Umpire'
+        innings:
+          type: object
+          properties:
+            first:
+              $ref: '#/components/schemas/Innings'
+            second:
+              $ref: '#/components/schemas/Innings'
+        currentInnings:
+          type: string
+          enum: [first, second]
+        result:
+          $ref: '#/components/schemas/MatchResult'
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+
+    MatchSettings:
+      type: object
+      properties:
+        overs:
+          type: integer
+        playersPerTeam:
+          type: integer
+        wideRuns:
+          type: integer
+        noBallRuns:
+          type: integer
+        noBallFreehit:
+          type: boolean
+
+    Toss:
+      type: object
+      properties:
+        winner:
+          type: string
+          enum: [teamA, teamB]
+        decision:
+          type: string
+          enum: [bat, bowl]
+        conductedAt:
+          type: string
+          format: date-time
+
+    Innings:
+      type: object
+      properties:
+        battingTeam:
+          type: string
+          enum: [teamA, teamB]
+        bowlingTeam:
+          type: string
+          enum: [teamA, teamB]
+        status:
+          type: string
+          enum: [not_started, in_progress, completed]
+        totalRuns:
+          type: integer
+        totalWickets:
+          type: integer
+        totalOvers:
+          type: integer
+        totalBalls:
+          type: integer
+        extras:
+          $ref: '#/components/schemas/Extras'
+        currentOver:
+          type: integer
+        currentBall:
+          type: integer
+        runRate:
+          type: number
+        requiredRunRate:
+          type: number
+        target:
+          type: integer
+        balls:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ball'
+
+    Extras:
+      type: object
+      properties:
+        wides:
+          type: integer
+        noBalls:
+          type: integer
+        byes:
+          type: integer
+        legByes:
+          type: integer
+        total:
+          type: integer
+
+    Ball:
+      type: object
+      properties:
+        overNumber:
+          type: integer
+        ballNumber:
+          type: integer
+        outcome:
+          type: string
+          enum: [dot, '1', '2', '3', '4', '6', wide, no_ball, bye, leg_bye, wicket]
+        runs:
+          type: object
+          properties:
+            batsmanRuns:
+              type: integer
+            extraRuns:
+              type: integer
+            totalRuns:
+              type: integer
+        isWicket:
+          type: boolean
+        wicket:
+          $ref: '#/components/schemas/Wicket'
+        isLegalDelivery:
+          type: boolean
+        isBoundary:
+          type: boolean
+        timestamp:
+          type: string
+          format: date-time
+
+    Wicket:
+      type: object
+      properties:
+        dismissalType:
+          type: string
+          enum: [bowled, caught, caught_and_bowled, run_out, stumped, lbw, hit_wicket, retired_hurt, obstructing_field, timed_out, handled_ball]
+        batsmanOut:
+          type: object
+        fielder:
+          type: object
+
+    MatchResult:
+      type: object
+      properties:
+        winner:
+          type: string
+          enum: [teamA, teamB]
+        resultType:
+          type: string
+          enum: [team_a_won, team_b_won, tie, no_result, abandoned]
+        winMargin:
+          type: object
+          properties:
+            runs:
+              type: integer
+            wickets:
+              type: integer
+        resultText:
+          type: string
+
+    TossRequest:
+      type: object
+      required:
+        - winner
+        - decision
+      properties:
+        winner:
+          type: string
+          enum: [teamA, teamB]
+        decision:
+          type: string
+          enum: [bat, bowl]
+
+    RecordBallRequest:
+      type: object
+      required:
+        - outcome
+      properties:
+        outcome:
+          type: string
+          enum: [dot, '1', '2', '3', '4', '6', wide, no_ball, bye, leg_bye, wicket]
+        runs:
+          type: integer
+          minimum: 0
+          maximum: 7
+        isWicket:
+          type: boolean
+        dismissalType:
+          type: string
+          enum: [bowled, caught, caught_and_bowled, run_out, stumped, lbw, hit_wicket]
+        batsmanOutId:
+          type: string
+        fielderId:
+          type: string
+        commentary:
+          type: string
+          maxLength: 200
+
+    # Response Schemas
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          type: object
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+        errorCode:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+    PaginatedResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+        meta:
+          type: object
+          properties:
+            pagination:
+              type: object
+              properties:
+                currentPage:
+                  type: integer
+                itemsPerPage:
+                  type: integer
+                totalItems:
+                  type: integer
+                totalPages:
+                  type: integer
+                hasNextPage:
+                  type: boolean
+                hasPrevPage:
+                  type: boolean
+
+  responses:
+    UnauthorizedError:
+      description: Access token is missing or invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ForbiddenError:
+      description: User does not have permission
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+paths:
+  # Authentication Endpoints
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Registration successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          user:
+                            $ref: '#/components/schemas/User'
+                          tokens:
+                            $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: Email or username already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          user:
+                            $ref: '#/components/schemas/User'
+                          tokens:
+                            $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /auth/verify-email:
+    post:
+      tags: [Authentication]
+      summary: Verify email with OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTPRequest'
+      responses:
+        '200':
+          description: Email verified successfully
+        '400':
+          description: Invalid or expired OTP
+
+  /auth/forgot-password:
+    post:
+      tags: [Authentication]
+      summary: Request password reset OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: OTP sent if account exists
+
+  /auth/reset-password:
+    post:
+      tags: [Authentication]
+      summary: Reset password with OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, otp, newPassword, confirmPassword]
+              properties:
+                email:
+                  type: string
+                  format: email
+                otp:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 8
+                confirmPassword:
+                  type: string
+      responses:
+        '200':
+          description: Password reset successful
+        '400':
+          description: Invalid or expired OTP
+
+  /auth/change-password:
+    post:
+      tags: [Authentication]
+      summary: Change password (authenticated)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword, confirmPassword]
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 8
+                confirmPassword:
+                  type: string
+      responses:
+        '200':
+          description: Password changed successfully
+        '401':
+          description: Current password incorrect
+
+  /auth/refresh-token:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: Token refreshed
+        '401':
+          description: Invalid refresh token
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Logout user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logged out successfully
+
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get current user profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          user:
+                            $ref: '#/components/schemas/User'
+
+  # User Endpoints
+  /users:
+    get:
+      tags: [Users]
+      summary: Get all users (Admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [admin, host, player, umpire, viewer]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, blocked, pending_verification]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /users/leaderboard:
+    get:
+      tags: [Users]
+      summary: Get leaderboard
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [runs, wickets, matches, wins, sixes, fours, catches]
+            default: runs
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Leaderboard data
+
+  /users/{userId}:
+    get:
+      tags: [Users]
+      summary: Get user by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User details
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags: [Users]
+      summary: Update user profile
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                phone:
+                  type: string
+                avatar:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Profile updated
+        '403':
+          description: Can only update own profile
+
+  /users/{userId}/statistics:
+    get:
+      tags: [Users]
+      summary: Get user statistics
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User statistics
+
+  # Room Endpoints
+  /rooms:
+    post:
+      tags: [Rooms]
+      summary: Create a new room
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoomRequest'
+      responses:
+        '201':
+          description: Room created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          room:
+                            $ref: '#/components/schemas/Room'
+
+    get:
+      tags: [Rooms]
+      summary: Get all rooms
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: myRooms
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: List of rooms
+
+  /rooms/join:
+    post:
+      tags: [Rooms]
+      summary: Join a room by code
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinRoomRequest'
+      responses:
+        '200':
+          description: Joined room successfully
+        '400':
+          description: Invalid room code
+        '409':
+          description: Already in room
+
+  /rooms/{roomId}:
+    get:
+      tags: [Rooms]
+      summary: Get room by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Room details
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags: [Rooms]
+      summary: Close room (Host only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Room closed
+        '403':
+          description: Host only
+
+  /rooms/{roomId}/teams/assign:
+    post:
+      tags: [Rooms]
+      summary: Assign player to team
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team]
+              properties:
+                team:
+                  type: string
+                  enum: [teamA, teamB]
+                userId:
+                  type: string
+                guestId:
+                  type: string
+                isCaptain:
+                  type: boolean
+      responses:
+        '200':
+          description: Player assigned
+
+  /rooms/{roomId}/match/start:
+    post:
+      tags: [Rooms]
+      summary: Start a match
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Match started
+        '400':
+          description: Room not ready
+
+  # Match Endpoints
+  /matches:
+    get:
+      tags: [Matches]
+      summary: Get all matches
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: roomId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of matches
+
+  /matches/{matchId}:
+    get:
+      tags: [Matches]
+      summary: Get match by ID
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Match details
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /matches/{matchId}/live:
+    get:
+      tags: [Matches]
+      summary: Get live score
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Live score data
+
+  /matches/{matchId}/toss:
+    post:
+      tags: [Matches]
+      summary: Conduct toss
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TossRequest'
+      responses:
+        '200':
+          description: Toss completed
+        '400':
+          description: Toss already done
+
+  /matches/{matchId}/ball:
+    post:
+      tags: [Matches]
+      summary: Record a ball
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordBallRequest'
+      responses:
+        '200':
+          description: Ball recorded
+
+    delete:
+      tags: [Matches]
+      summary: Undo last ball
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ball undone
+        '400':
+          description: No balls to undo
+
+  # Admin Endpoints
+  /admin/dashboard:
+    get:
+      tags: [Admin]
+      summary: Get dashboard statistics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dashboard stats
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: Get all users with admin view
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of users
+
+  /admin/users/{userId}/block:
+    patch:
+      tags: [Admin]
+      summary: Toggle user block status
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Block status toggled
+
+  /admin/matches/{matchId}/end:
+    post:
+      tags: [Admin]
+      summary: Force end a match
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: matchId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Match ended
