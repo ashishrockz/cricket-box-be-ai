@@ -80,8 +80,10 @@ router.get('/:matchId', mongoIdValidation('matchId'), catchAsync(matchController
  * @swagger
  * /api/v1/matches/{matchId}/live:
  *   get:
- *     summary: Get live score
+ *     summary: Get live score (Room participants only)
  *     tags: [Matches]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: matchId
@@ -90,11 +92,37 @@ router.get('/:matchId', mongoIdValidation('matchId'), catchAsync(matchController
  *           type: string
  *     responses:
  *       200:
- *         description: Live score data
+ *         description: Live score data with recent balls
+ *       403:
+ *         description: Only room participants can view live score
  *       404:
  *         description: Match not found
  */
-router.get('/:matchId/live', mongoIdValidation('matchId'), catchAsync(matchController.getLiveScore));
+router.get('/:matchId/live', authenticate, mongoIdValidation('matchId'), catchAsync(matchController.getLiveScore));
+
+/**
+ * @swagger
+ * /api/v1/matches/{matchId}/scoreboard:
+ *   get:
+ *     summary: Get full scoreboard (Room participants only)
+ *     tags: [Matches]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: matchId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Full scoreboard with innings details, fall of wickets, player performances
+ *       403:
+ *         description: Only room participants can view scoreboard
+ *       404:
+ *         description: Match not found
+ */
+router.get('/:matchId/scoreboard', authenticate, mongoIdValidation('matchId'), catchAsync(matchController.getScoreboard));
 
 /**
  * @swagger

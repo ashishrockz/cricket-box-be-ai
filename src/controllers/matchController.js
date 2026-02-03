@@ -1,44 +1,46 @@
-const { Match, Room, User } = require('../models');
-const { 
-  successResponse, 
+const { Match, Room, User, Notification } = require('../models');
+const {
+  successResponse,
   createdResponse,
-  paginatedResponse 
+  paginatedResponse
 } = require('../utils/response');
-const { 
-  NotFoundError, 
+const {
+  NotFoundError,
   AuthorizationError,
   ValidationError,
   ERROR_CODES,
-  ERROR_MESSAGES 
+  ERROR_MESSAGES
 } = require('../utils/errors');
 const { parsePagination, parseSort, calculateRunRate } = require('../utils/helpers');
-const { 
-  MATCH_STATUS, 
-  ROOM_STATUS, 
-  INNINGS_STATUS, 
+const {
+  MATCH_STATUS,
+  ROOM_STATUS,
+  INNINGS_STATUS,
   BALL_OUTCOMES,
   TOSS_DECISIONS,
-  DEFAULTS 
+  DEFAULTS,
+  NOTIFICATION_TYPES
 } = require('../config/constants');
+const socketService = require('../services/socketService');
+const notificationService = require('../services/notificationService');
 
 /**
  * @desc    Start a new match
  * @route   POST /api/v1/rooms/:roomId/match/start
- * @access  Private (Host only)
+ * @access  Private (Creator only)
  */
 const startMatch = async (req, res) => {
   const { roomId } = req.params;
 
   const room = await Room.findById(roomId)
-    .populate('teamA.players.user', 'username firstName lastName')
-    .populate('teamB.players.user', 'username firstName lastName');
+    .populate('participants.user', 'username firstName lastName');
 
   if (!room) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
+  if (!room.isCreator(req.user._id)) {
+    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_CREATOR]);
   }
 
   if (room.status !== ROOM_STATUS.READY) {
@@ -48,6 +50,9 @@ const startMatch = async (req, res) => {
   if (!room.teamsReady) {
     throw new ValidationError(ERROR_MESSAGES[ERROR_CODES.TEAMS_NOT_READY]);
   }
+
+  // Get umpire from participants (the one with umpire role)
+  const umpireParticipant = room.participants.find(p => p.role === 'umpire');
 
   // Create match
   const matchNumber = (room.matchHistory?.length || 0) + 1;
@@ -65,39 +70,46 @@ const startMatch = async (req, res) => {
     },
     teamA: {
       name: room.teamA.name,
-      players: room.teamA.players
+      players: room.teamA.players.map(p => ({
+        guestName: p.name,
+        isCaptain: p.isCaptain,
+        isGuest: true
+      }))
     },
     teamB: {
       name: room.teamB.name,
-      players: room.teamB.players
+      players: room.teamB.players.map(p => ({
+        guestName: p.name,
+        isCaptain: p.isCaptain,
+        isGuest: true
+      }))
     },
-    umpire: room.umpire,
+    umpire: umpireParticipant ? {
+      user: umpireParticipant.user._id || umpireParticipant.user,
+      isGuest: false
+    } : { user: room.creator, isGuest: false },
     createdBy: req.user._id,
     startTime: new Date()
   });
 
-  // Initialize player performances
+  // Initialize player performances for team players
   const performances = [];
-  
-  room.teamA.players.forEach(player => {
+
+  room.teamA.players.forEach((player, index) => {
     performances.push({
       player: {
-        user: player.user,
-        isGuest: player.isGuest,
-        guestName: player.guestName,
-        guestId: player.guestId
+        isGuest: true,
+        guestName: player.name
       },
       team: 'teamA'
     });
   });
 
-  room.teamB.players.forEach(player => {
+  room.teamB.players.forEach((player, index) => {
     performances.push({
       player: {
-        user: player.user,
-        isGuest: player.isGuest,
-        guestName: player.guestName,
-        guestId: player.guestId
+        isGuest: true,
+        guestName: player.name
       },
       team: 'teamB'
     });
@@ -110,6 +122,31 @@ const startMatch = async (req, res) => {
   room.currentMatch = match._id;
   room.status = ROOM_STATUS.IN_MATCH;
   await room.save();
+
+  // Notify all room participants
+  const participantUserIds = room.participants
+    .filter(p => p.user)
+    .map(p => p.user._id || p.user);
+
+  for (const userId of participantUserIds) {
+    if (userId.toString() !== req.user._id.toString()) {
+      await notificationService.createAndEmit({
+        recipient: userId,
+        type: NOTIFICATION_TYPES.MATCH_STARTED,
+        title: 'Match Started',
+        message: `Match has started in room "${room.name}". Toss is about to be conducted.`,
+        data: { roomId: room._id, matchId: match._id }
+      });
+    }
+  }
+
+  // Emit to room via socket
+  socketService.emitMatchStart(roomId, {
+    matchId: match._id,
+    status: match.status,
+    teamA: match.teamA.name,
+    teamB: match.teamB.name
+  });
 
   return createdResponse(res, {
     message: 'Match started. Please conduct the toss.',
@@ -132,12 +169,13 @@ const conductToss = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.MATCH_NOT_FOUND]);
   }
 
-  // Verify umpire
+  // Verify umpire or creator (for solo mode)
   const isUmpire = match.umpire.user?.toString() === req.user._id.toString();
-  const room = await Room.findById(match.room);
-  const isHost = room?.isHost(req.user._id);
+  const room = await Room.findById(match.room).populate('participants.user');
+  const isCreator = room?.isCreator(req.user._id);
+  const isSoloMode = room?.isSoloMode;
 
-  if (!isUmpire && !isHost) {
+  if (!isUmpire && !(isSoloMode && isCreator)) {
     throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_UMPIRE]);
   }
 
@@ -191,6 +229,30 @@ const conductToss = async (req, res) => {
 
   await match.save();
 
+  // Emit toss result to room
+  socketService.emitTossResult(match._id.toString(), {
+    winner,
+    decision,
+    battingFirst: match[battingFirst].name,
+    bowlingFirst: match[bowlingFirst].name
+  });
+
+  // Notify participants
+  const participantUserIds = room.participants
+    .filter(p => p.user)
+    .map(p => p.user._id || p.user);
+
+  for (const userId of participantUserIds) {
+    if (userId.toString() !== req.user._id.toString()) {
+      socketService.emitNotification(userId.toString(), {
+        type: 'TOSS_RESULT',
+        title: 'Toss Completed',
+        message: `${match[winner].name} won the toss and chose to ${decision}`,
+        data: { matchId: match._id }
+      });
+    }
+  }
+
   return successResponse(res, {
     message: 'Toss completed',
     data: {
@@ -216,12 +278,13 @@ const setBatsmen = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.MATCH_NOT_FOUND]);
   }
 
-  // Verify umpire
+  // Verify umpire or creator (for solo mode)
   const isUmpire = match.umpire.user?.toString() === req.user._id.toString();
   const room = await Room.findById(match.room);
-  const isHost = room?.isHost(req.user._id);
+  const isCreator = room?.isCreator(req.user._id);
+  const isSoloMode = room?.isSoloMode;
 
-  if (!isUmpire && !isHost) {
+  if (!isUmpire && !(isSoloMode && isCreator)) {
     throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_UMPIRE]);
   }
 
@@ -307,12 +370,13 @@ const setBowler = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.MATCH_NOT_FOUND]);
   }
 
-  // Verify umpire
+  // Verify umpire or creator (for solo mode)
   const isUmpire = match.umpire.user?.toString() === req.user._id.toString();
   const room = await Room.findById(match.room);
-  const isHost = room?.isHost(req.user._id);
+  const isCreator = room?.isCreator(req.user._id);
+  const isSoloMode = room?.isSoloMode;
 
-  if (!isUmpire && !isHost) {
+  if (!isUmpire && !(isSoloMode && isCreator)) {
     throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_UMPIRE]);
   }
 
@@ -373,12 +437,13 @@ const recordBall = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.MATCH_NOT_FOUND]);
   }
 
-  // Verify umpire
+  // Verify umpire or creator (for solo mode)
   const isUmpire = match.umpire.user?.toString() === req.user._id.toString();
-  const room = await Room.findById(match.room);
-  const isHost = room?.isHost(req.user._id);
+  const room = await Room.findById(match.room).populate('participants.user');
+  const isCreator = room?.isCreator(req.user._id);
+  const isSoloMode = room?.isSoloMode;
 
-  if (!isUmpire && !isHost) {
+  if (!isUmpire && !(isSoloMode && isCreator)) {
     throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_UMPIRE]);
   }
 
@@ -602,6 +667,66 @@ const recordBall = async (req, res) => {
   }
 
   await match.save();
+
+  // Emit live score update to all room participants
+  const scoreUpdate = {
+    matchId: match._id,
+    ball,
+    innings: {
+      battingTeam: match[currentInnings.battingTeam].name,
+      totalRuns: currentInnings.totalRuns,
+      totalWickets: currentInnings.totalWickets,
+      overs: `${currentInnings.totalOvers}.${currentInnings.currentBall}`,
+      runRate: currentInnings.runRate,
+      status: currentInnings.status
+    },
+    matchStatus: match.status,
+    result: match.result
+  };
+
+  // Emit to match room
+  socketService.emitBallUpdate(match._id.toString(), scoreUpdate);
+  socketService.emitScoreUpdate(match._id.toString(), scoreUpdate);
+
+  // Also emit to the room
+  socketService.emitToRoom(match.room.toString(), 'live_score_update', scoreUpdate);
+
+  // If wicket, emit wicket event
+  if (ball.isWicket) {
+    socketService.emitWicket(match._id.toString(), {
+      wicket: ball.wicket,
+      score: `${currentInnings.totalRuns}/${currentInnings.totalWickets}`
+    });
+  }
+
+  // If over complete, emit over complete
+  if (isLegalDelivery && currentInnings.currentBall === 0) {
+    socketService.emitOverComplete(match._id.toString(), {
+      overNumber: currentInnings.currentOver - 1,
+      runs: currentInnings.totalRuns,
+      wickets: currentInnings.totalWickets
+    });
+  }
+
+  // If match completed, notify all participants
+  if (match.status === MATCH_STATUS.COMPLETED) {
+    socketService.emitMatchEnd(match._id.toString(), match.result);
+
+    // Send notifications to all participants
+    const participantUserIds = room.participants
+      .filter(p => p.user)
+      .map(p => p.user._id || p.user);
+
+    for (const userId of participantUserIds) {
+      await notificationService.createAndEmit({
+        recipient: userId,
+        type: NOTIFICATION_TYPES.MATCH_ENDED,
+        title: 'Match Completed',
+        message: match.result?.resultText || 'Match has ended',
+        data: { roomId: room._id, matchId: match._id, result: match.result }
+      });
+    }
+  }
 
   return successResponse(res, {
     message: 'Ball recorded',
@@ -837,21 +962,30 @@ const getAllMatches = async (req, res) => {
 };
 
 /**
- * @desc    Get live score
+ * @desc    Get live score (Room participants only)
  * @route   GET /api/v1/matches/:matchId/live
- * @access  Public
+ * @access  Private (Room participants only)
  */
 const getLiveScore = async (req, res) => {
   const { matchId } = req.params;
 
   const match = await Match.findById(matchId)
-    .select('teamA.name teamB.name status innings currentInnings toss result settings');
+    .select('teamA.name teamB.name status innings currentInnings toss result settings room');
 
   if (!match) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.MATCH_NOT_FOUND]);
   }
 
+  // Verify user is a room participant
+  const room = await Room.findById(match.room);
+  if (!room.isParticipant(req.user._id) && !room.isCreator(req.user._id)) {
+    throw new AuthorizationError('Only room participants can view live score');
+  }
+
   const currentInnings = match.innings[match.currentInnings];
+
+  // Get last 5 balls for recent activity
+  const recentBalls = currentInnings?.balls?.slice(-5) || [];
 
   return successResponse(res, {
     data: {
@@ -860,17 +994,99 @@ const getLiveScore = async (req, res) => {
       currentInnings: match.currentInnings,
       score: {
         battingTeam: match[currentInnings?.battingTeam]?.name,
+        bowlingTeam: match[currentInnings?.bowlingTeam]?.name,
         runs: currentInnings?.totalRuns || 0,
         wickets: currentInnings?.totalWickets || 0,
         overs: currentInnings ? `${currentInnings.totalOvers}.${currentInnings.currentBall}` : '0.0',
         runRate: currentInnings?.runRate || 0,
         target: match.currentInnings === 'second' ? match.innings.first.totalRuns + 1 : null,
-        requiredRunRate: match.currentInnings === 'second' ? match.calculateRequiredRunRate() : null
+        requiredRunRate: match.currentInnings === 'second' ? match.calculateRequiredRunRate() : null,
+        extras: currentInnings?.extras
       },
       batsmen: currentInnings?.currentBatsmen,
       bowler: currentInnings?.currentBowler,
+      recentBalls,
       lastBall: currentInnings?.balls?.slice(-1)[0],
+      fallOfWickets: currentInnings?.fallOfWickets || [],
       result: match.result
+    }
+  });
+};
+
+/**
+ * @desc    Get full scoreboard
+ * @route   GET /api/v1/matches/:matchId/scoreboard
+ * @access  Private (Room participants only)
+ */
+const getScoreboard = async (req, res) => {
+  const { matchId } = req.params;
+
+  const match = await Match.findById(matchId)
+    .populate('room', 'name code participants')
+    .populate('umpire.user', 'username firstName lastName');
+
+  if (!match) {
+    throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.MATCH_NOT_FOUND]);
+  }
+
+  // Verify user is a room participant
+  const room = await Room.findById(match.room);
+  if (!room.isParticipant(req.user._id) && !room.isCreator(req.user._id)) {
+    throw new AuthorizationError('Only room participants can view scoreboard');
+  }
+
+  const firstInnings = match.innings.first;
+  const secondInnings = match.innings.second;
+
+  return successResponse(res, {
+    data: {
+      match: {
+        id: match._id,
+        status: match.status,
+        toss: match.toss,
+        result: match.result
+      },
+      teamA: {
+        name: match.teamA.name,
+        players: match.teamA.players,
+        score: firstInnings?.battingTeam === 'teamA'
+          ? { runs: firstInnings.totalRuns, wickets: firstInnings.totalWickets, overs: firstInnings.totalOvers }
+          : secondInnings?.battingTeam === 'teamA'
+            ? { runs: secondInnings.totalRuns, wickets: secondInnings.totalWickets, overs: secondInnings.totalOvers }
+            : null
+      },
+      teamB: {
+        name: match.teamB.name,
+        players: match.teamB.players,
+        score: firstInnings?.battingTeam === 'teamB'
+          ? { runs: firstInnings.totalRuns, wickets: firstInnings.totalWickets, overs: firstInnings.totalOvers }
+          : secondInnings?.battingTeam === 'teamB'
+            ? { runs: secondInnings.totalRuns, wickets: secondInnings.totalWickets, overs: secondInnings.totalOvers }
+            : null
+      },
+      innings: {
+        first: firstInnings ? {
+          battingTeam: match[firstInnings.battingTeam]?.name,
+          runs: firstInnings.totalRuns,
+          wickets: firstInnings.totalWickets,
+          overs: `${firstInnings.totalOvers}.${firstInnings.currentBall || 0}`,
+          extras: firstInnings.extras,
+          runRate: firstInnings.runRate,
+          fallOfWickets: firstInnings.fallOfWickets
+        } : null,
+        second: secondInnings?.status !== INNINGS_STATUS.NOT_STARTED ? {
+          battingTeam: match[secondInnings.battingTeam]?.name,
+          runs: secondInnings.totalRuns,
+          wickets: secondInnings.totalWickets,
+          overs: `${secondInnings.totalOvers}.${secondInnings.currentBall || 0}`,
+          extras: secondInnings.extras,
+          runRate: secondInnings.runRate,
+          target: match.innings.first.totalRuns + 1,
+          requiredRunRate: secondInnings.requiredRunRate,
+          fallOfWickets: secondInnings.fallOfWickets
+        } : null
+      },
+      playerPerformances: match.playerPerformances
     }
   });
 };
@@ -890,10 +1106,10 @@ const endMatch = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.MATCH_NOT_FOUND]);
   }
 
-  const room = await Room.findById(match.room);
-  
-  if (!room.isHost(req.user._id) && req.user.role !== 'admin') {
-    throw new AuthorizationError('Only host or admin can end the match');
+  const room = await Room.findById(match.room).populate('participants.user');
+
+  if (!room.isCreator(req.user._id) && req.user.role !== 'admin') {
+    throw new AuthorizationError('Only creator or admin can end the match');
   }
 
   match.status = MATCH_STATUS.ABANDONED;
@@ -924,5 +1140,6 @@ module.exports = {
   getMatchById,
   getAllMatches,
   getLiveScore,
+  getScoreboard,
   endMatch
 };
