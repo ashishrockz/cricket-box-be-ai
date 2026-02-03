@@ -1,22 +1,19 @@
 const { Room, Match } = require('../models');
-const { v4: uuidv4 } = require('uuid');
-const bcrypt = require('bcryptjs');
-const { 
-  successResponse, 
+const {
+  successResponse,
   createdResponse,
-  paginatedResponse, 
-  noContentResponse 
+  paginatedResponse
 } = require('../utils/response');
-const { 
-  NotFoundError, 
+const {
+  NotFoundError,
   AuthorizationError,
   ConflictError,
   ValidationError,
   ERROR_CODES,
-  ERROR_MESSAGES 
+  ERROR_MESSAGES
 } = require('../utils/errors');
 const { parsePagination, parseSort } = require('../utils/helpers');
-const { ROOM_STATUS, MATCH_STATUS } = require('../config/constants');
+const { ROOM_STATUS, ROOM_ROLES } = require('../config/constants');
 
 /**
  * @desc    Create a new room
@@ -26,26 +23,20 @@ const { ROOM_STATUS, MATCH_STATUS } = require('../config/constants');
 const createRoom = async (req, res) => {
   const { name, description, settings } = req.body;
 
-  let roomSettings = settings || {};
-  if (roomSettings.password) {
-    const salt = await bcrypt.genSalt(10);
-    roomSettings.password = await bcrypt.hash(roomSettings.password, salt);
-    roomSettings.isPrivate = true;
-  }
-
   const room = await Room.create({
     name,
     description,
-    host: req.user._id,
-    settings: roomSettings,
+    creator: req.user._id,
+    settings: settings || {},
     participants: [{
       user: req.user._id,
       joinedAt: new Date(),
+      role: null,
       isReady: true
     }]
   });
 
-  await room.populate('host', 'username firstName lastName fullName avatar');
+  await room.populate('creator', 'username firstName lastName fullName avatar');
   await room.populate('participants.user', 'username firstName lastName fullName avatar');
 
   return createdResponse(res, {
@@ -56,14 +47,12 @@ const createRoom = async (req, res) => {
         name: room.name,
         code: room.code,
         description: room.description,
-        host: room.host,
+        creator: room.creator,
         status: room.status,
-        settings: {
-          ...room.settings.toObject(),
-          password: undefined
-        },
+        settings: room.settings,
         participants: room.participants,
-        totalParticipants: room.totalParticipants,
+        participantCount: room.participantCount,
+        isSoloMode: room.isSoloMode,
         createdAt: room.createdAt
       }
     }
@@ -71,31 +60,23 @@ const createRoom = async (req, res) => {
 };
 
 /**
- * @desc    Get all rooms (with filters)
+ * @desc    Get user's rooms (rooms they created or joined)
  * @route   GET /api/v1/rooms
  * @access  Private
  */
-const getAllRooms = async (req, res) => {
+const getMyRooms = async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query);
   const sort = parseSort(req.query.sort, ['createdAt', 'name', 'status']);
 
   const filter = {
-    status: { $in: [ROOM_STATUS.WAITING, ROOM_STATUS.TEAM_SETUP, ROOM_STATUS.READY] }
+    $or: [
+      { creator: req.user._id },
+      { 'participants.user': req.user._id }
+    ]
   };
 
   if (req.query.status) {
     filter.status = req.query.status;
-  }
-
-  if (req.query.myRooms !== 'true') {
-    filter['settings.isPrivate'] = false;
-  } else {
-    filter.$or = [
-      { host: req.user._id },
-      { 'participants.user': req.user._id }
-    ];
-    delete filter.status;
-    delete filter['settings.isPrivate'];
   }
 
   const [rooms, total] = await Promise.all([
@@ -103,8 +84,8 @@ const getAllRooms = async (req, res) => {
       .sort(sort)
       .skip(skip)
       .limit(limit)
-      .populate('host', 'username firstName lastName fullName avatar')
-      .select('-settings.password'),
+      .populate('creator', 'username firstName lastName fullName avatar')
+      .populate('participants.user', 'username firstName lastName fullName avatar'),
     Room.countDocuments(filter)
   ]);
 
@@ -126,13 +107,9 @@ const getRoomById = async (req, res) => {
   const { roomId } = req.params;
 
   const room = await Room.findById(roomId)
-    .populate('host', 'username firstName lastName fullName avatar')
+    .populate('creator', 'username firstName lastName fullName avatar')
     .populate('participants.user', 'username firstName lastName fullName avatar')
-    .populate('teamA.players.user', 'username firstName lastName fullName avatar')
-    .populate('teamB.players.user', 'username firstName lastName fullName avatar')
-    .populate('umpire.user', 'username firstName lastName fullName avatar')
-    .populate('currentMatch')
-    .select('-settings.password');
+    .populate('currentMatch');
 
   if (!room) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
@@ -149,11 +126,10 @@ const getRoomById = async (req, res) => {
  * @access  Private
  */
 const joinRoom = async (req, res) => {
-  const { code, password } = req.body;
+  const { code } = req.body;
 
   const room = await Room.findOne({ code: code.toUpperCase() })
-    .select('+settings.password')
-    .populate('host', 'username firstName lastName fullName avatar');
+    .populate('creator', 'username firstName lastName fullName avatar');
 
   if (!room) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.INVALID_ROOM_CODE]);
@@ -164,28 +140,22 @@ const joinRoom = async (req, res) => {
   }
 
   if (room.isFull) {
-    throw new ValidationError(ERROR_MESSAGES[ERROR_CODES.ROOM_FULL]);
+    throw new ValidationError('Room is full (maximum 3 participants)');
   }
 
   if (room.isParticipant(req.user._id)) {
     throw new ConflictError(ERROR_MESSAGES[ERROR_CODES.USER_ALREADY_IN_ROOM]);
   }
 
-  if (room.settings.isPrivate && room.settings.password) {
-    if (!password) {
-      throw new ValidationError('Password is required for this room');
-    }
-    const isMatch = await bcrypt.compare(password, room.settings.password);
-    if (!isMatch) {
-      throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.INVALID_ROOM_PASSWORD]);
-    }
+  room.addParticipant(req.user._id);
+
+  // If room now has 3 participants, move to role selection
+  if (room.participants.length === 3) {
+    room.status = ROOM_STATUS.ROLE_SELECTION;
   }
 
-  room.addParticipant(req.user._id);
   await room.save();
-
   await room.populate('participants.user', 'username firstName lastName fullName avatar');
-  room.settings.password = undefined;
 
   return successResponse(res, {
     message: 'Joined room successfully',
@@ -207,8 +177,8 @@ const leaveRoom = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (room.isHost(req.user._id)) {
-    throw new ValidationError('Host cannot leave the room. Please close the room instead.');
+  if (room.isCreator(req.user._id)) {
+    throw new ValidationError('Creator cannot leave the room. Please close the room instead.');
   }
 
   if (!room.isParticipant(req.user._id)) {
@@ -220,6 +190,12 @@ const leaveRoom = async (req, res) => {
   }
 
   room.removeParticipant(req.user._id);
+
+  // If room no longer has 3 participants, revert to waiting
+  if (room.participants.length < 3 && room.status === ROOM_STATUS.ROLE_SELECTION) {
+    room.status = ROOM_STATUS.WAITING;
+  }
+
   await room.save();
 
   return successResponse(res, {
@@ -228,7 +204,7 @@ const leaveRoom = async (req, res) => {
 };
 
 /**
- * @desc    Update room settings (Host only)
+ * @desc    Update room settings (Creator only)
  * @route   PUT /api/v1/rooms/:roomId
  * @access  Private
  */
@@ -242,8 +218,8 @@ const updateRoom = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
+  if (!room.isCreator(req.user._id)) {
+    throw new AuthorizationError('Only the room creator can update room settings');
   }
 
   if (room.status === ROOM_STATUS.IN_MATCH) {
@@ -252,18 +228,12 @@ const updateRoom = async (req, res) => {
 
   if (name) room.name = name;
   if (description !== undefined) room.description = description;
-  
+
   if (settings) {
-    if (settings.password) {
-      const salt = await bcrypt.genSalt(10);
-      settings.password = await bcrypt.hash(settings.password, salt);
-      settings.isPrivate = true;
-    }
     Object.assign(room.settings, settings);
   }
 
   await room.save();
-  room.settings.password = undefined;
 
   return successResponse(res, {
     message: 'Room updated successfully',
@@ -272,7 +242,7 @@ const updateRoom = async (req, res) => {
 };
 
 /**
- * @desc    Close/Delete room (Host only)
+ * @desc    Close/Delete room (Creator only)
  * @route   DELETE /api/v1/rooms/:roomId
  * @access  Private
  */
@@ -285,8 +255,8 @@ const closeRoom = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
+  if (!room.isCreator(req.user._id)) {
+    throw new AuthorizationError('Only the room creator can close the room');
   }
 
   if (room.status === ROOM_STATUS.IN_MATCH) {
@@ -302,13 +272,13 @@ const closeRoom = async (req, res) => {
 };
 
 /**
- * @desc    Add guest participant (Host only)
- * @route   POST /api/v1/rooms/:roomId/guests
+ * @desc    Select role (Umpire, Team A In-charge, Team B In-charge)
+ * @route   POST /api/v1/rooms/:roomId/select-role
  * @access  Private
  */
-const addGuest = async (req, res) => {
+const selectRole = async (req, res) => {
   const { roomId } = req.params;
-  const { name } = req.body;
+  const { role } = req.body;
 
   const room = await Room.findById(roomId);
 
@@ -316,66 +286,45 @@ const addGuest = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
+  if (!room.isParticipant(req.user._id)) {
+    throw new ValidationError(ERROR_MESSAGES[ERROR_CODES.USER_NOT_IN_ROOM]);
   }
 
-  if (!room.settings.allowGuests) {
-    throw new ValidationError('Guests are not allowed in this room');
+  // Solo mode - creator can do everything, no role selection needed
+  if (room.isSoloMode) {
+    throw new ValidationError('Role selection is not needed in solo mode');
   }
 
-  if (room.isFull) {
-    throw new ValidationError(ERROR_MESSAGES[ERROR_CODES.ROOM_FULL]);
+  if (room.participants.length < 3) {
+    throw new ValidationError('Need 3 participants before selecting roles');
   }
 
-  const guestId = uuidv4();
+  if (!Object.values(ROOM_ROLES).includes(role)) {
+    throw new ValidationError('Invalid role. Choose from: umpire, team_a_incharge, team_b_incharge');
+  }
 
-  room.guestParticipants.push({
-    name,
-    guestId,
-    joinedAt: new Date(),
-    isReady: false
-  });
+  room.assignRole(req.user._id, role);
+
+  // Check if all roles are assigned
+  if (room.rolesAssigned) {
+    room.status = ROOM_STATUS.TEAM_SETUP;
+  }
 
   await room.save();
-
-  return createdResponse(res, {
-    message: 'Guest added successfully',
-    data: { guest: { name, guestId } }
-  });
-};
-
-/**
- * @desc    Remove guest participant (Host only)
- * @route   DELETE /api/v1/rooms/:roomId/guests/:guestId
- * @access  Private
- */
-const removeGuest = async (req, res) => {
-  const { roomId, guestId } = req.params;
-
-  const room = await Room.findById(roomId);
-
-  if (!room) {
-    throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
-  }
-
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
-  }
-
-  room.guestParticipants = room.guestParticipants.filter(g => g.guestId !== guestId);
-  room.teamA.players = room.teamA.players.filter(p => p.guestId !== guestId);
-  room.teamB.players = room.teamB.players.filter(p => p.guestId !== guestId);
-
-  await room.save();
+  await room.populate('participants.user', 'username firstName lastName fullName avatar');
 
   return successResponse(res, {
-    message: 'Guest removed successfully'
+    message: `Role '${role}' assigned successfully`,
+    data: {
+      participants: room.participants,
+      rolesAssigned: room.rolesAssigned,
+      status: room.status
+    }
   });
 };
 
 /**
- * @desc    Set team names (Host only)
+ * @desc    Set team names (Creator or respective In-charge)
  * @route   PUT /api/v1/rooms/:roomId/teams
  * @access  Private
  */
@@ -389,12 +338,28 @@ const setTeamNames = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
+  // In solo mode, creator can set both team names
+  if (room.isSoloMode) {
+    if (!room.isCreator(req.user._id)) {
+      throw new AuthorizationError('Only the creator can set team names in solo mode');
+    }
+    if (teamAName) room.teamA.name = teamAName;
+    if (teamBName) room.teamB.name = teamBName;
+  } else {
+    // In 3-player mode, each in-charge can only set their team's name
+    if (teamAName) {
+      if (!room.isTeamAIncharge(req.user._id) && !room.isCreator(req.user._id)) {
+        throw new AuthorizationError('Only Team A In-charge can set Team A name');
+      }
+      room.teamA.name = teamAName;
+    }
+    if (teamBName) {
+      if (!room.isTeamBIncharge(req.user._id) && !room.isCreator(req.user._id)) {
+        throw new AuthorizationError('Only Team B In-charge can set Team B name');
+      }
+      room.teamB.name = teamBName;
+    }
   }
-
-  if (teamAName) room.teamA.name = teamAName;
-  if (teamBName) room.teamB.name = teamBName;
 
   await room.save();
 
@@ -408,13 +373,17 @@ const setTeamNames = async (req, res) => {
 };
 
 /**
- * @desc    Assign player to team (Host only)
- * @route   POST /api/v1/rooms/:roomId/teams/assign
+ * @desc    Add player to team (In-charge adds players by name)
+ * @route   POST /api/v1/rooms/:roomId/teams/:team/players
  * @access  Private
  */
-const assignToTeam = async (req, res) => {
-  const { roomId } = req.params;
-  const { team, userId, guestId, isCaptain } = req.body;
+const addPlayerToTeam = async (req, res) => {
+  const { roomId, team } = req.params;
+  const { playerName, isCaptain } = req.body;
+
+  if (!['teamA', 'teamB'].includes(team)) {
+    throw new ValidationError('Invalid team. Use teamA or teamB');
+  }
 
   const room = await Room.findById(roomId);
 
@@ -422,80 +391,60 @@ const assignToTeam = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
-  }
-
-  const targetTeam = team === 'teamA' ? room.teamA : room.teamB;
-  if (targetTeam.players.length >= room.settings.playersPerTeam) {
-    throw new ValidationError(ERROR_MESSAGES[ERROR_CODES.TEAM_FULL]);
-  }
-
-  let playerEntry;
-  
-  if (userId) {
-    if (!room.isParticipant(userId)) {
-      throw new ValidationError('User is not a participant of this room');
+  // Check authorization
+  if (room.isSoloMode) {
+    if (!room.isCreator(req.user._id)) {
+      throw new AuthorizationError('Only the creator can add players in solo mode');
     }
-    
-    if (room.isInTeam(userId)) {
-      throw new ConflictError(ERROR_MESSAGES[ERROR_CODES.PLAYER_ALREADY_IN_TEAM]);
-    }
-    
-    playerEntry = {
-      user: userId,
-      isGuest: false,
-      isCaptain: isCaptain || false
-    };
-  } else if (guestId) {
-    const guest = room.guestParticipants.find(g => g.guestId === guestId);
-    if (!guest) {
-      throw new ValidationError('Guest not found in room');
-    }
-    
-    const inTeamA = room.teamA.players.some(p => p.guestId === guestId);
-    const inTeamB = room.teamB.players.some(p => p.guestId === guestId);
-    if (inTeamA || inTeamB) {
-      throw new ConflictError(ERROR_MESSAGES[ERROR_CODES.PLAYER_ALREADY_IN_TEAM]);
-    }
-    
-    playerEntry = {
-      isGuest: true,
-      guestName: guest.name,
-      guestId: guest.guestId,
-      isCaptain: isCaptain || false
-    };
   } else {
-    throw new ValidationError('Either userId or guestId is required');
+    const isTeamAIncharge = room.isTeamAIncharge(req.user._id);
+    const isTeamBIncharge = room.isTeamBIncharge(req.user._id);
+    const isCreator = room.isCreator(req.user._id);
+
+    if (team === 'teamA' && !isTeamAIncharge && !isCreator) {
+      throw new AuthorizationError('Only Team A In-charge can add players to Team A');
+    }
+    if (team === 'teamB' && !isTeamBIncharge && !isCreator) {
+      throw new AuthorizationError('Only Team B In-charge can add players to Team B');
+    }
   }
 
+  const targetTeam = room[team];
+
+  if (targetTeam.players.length >= room.settings.playersPerTeam) {
+    throw new ValidationError(`Team is full (maximum ${room.settings.playersPerTeam} players)`);
+  }
+
+  // If setting as captain, remove captain from existing player
   if (isCaptain) {
     targetTeam.players.forEach(p => p.isCaptain = false);
   }
 
-  targetTeam.players.push(playerEntry);
-
-  if (room.status === ROOM_STATUS.WAITING) {
-    room.status = ROOM_STATUS.TEAM_SETUP;
-  }
+  targetTeam.players.push({
+    name: playerName,
+    isCaptain: isCaptain || false,
+    addedBy: req.user._id
+  });
 
   await room.save();
-  await room.populate(`${team}.players.user`, 'username firstName lastName fullName avatar');
 
-  return successResponse(res, {
-    message: 'Player assigned to team successfully',
+  return createdResponse(res, {
+    message: 'Player added to team successfully',
     data: { team: room[team] }
   });
 };
 
 /**
- * @desc    Remove player from team (Host only)
- * @route   DELETE /api/v1/rooms/:roomId/teams/:team/player
+ * @desc    Remove player from team
+ * @route   DELETE /api/v1/rooms/:roomId/teams/:team/players/:playerId
  * @access  Private
  */
-const removeFromTeam = async (req, res) => {
-  const { roomId, team } = req.params;
-  const { userId, guestId } = req.body;
+const removePlayerFromTeam = async (req, res) => {
+  const { roomId, team, playerId } = req.params;
+
+  if (!['teamA', 'teamB'].includes(team)) {
+    throw new ValidationError('Invalid team. Use teamA or teamB');
+  }
 
   const room = await Room.findById(roomId);
 
@@ -503,75 +452,91 @@ const removeFromTeam = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
-  }
-
-  const targetTeam = team === 'teamA' ? room.teamA : room.teamB;
-
-  if (userId) {
-    targetTeam.players = targetTeam.players.filter(
-      p => !p.user || p.user.toString() !== userId
-    );
-  } else if (guestId) {
-    targetTeam.players = targetTeam.players.filter(p => p.guestId !== guestId);
-  }
-
-  await room.save();
-
-  return successResponse(res, {
-    message: 'Player removed from team successfully'
-  });
-};
-
-/**
- * @desc    Assign umpire (Host only)
- * @route   POST /api/v1/rooms/:roomId/umpire
- * @access  Private
- */
-const assignUmpire = async (req, res) => {
-  const { roomId } = req.params;
-  const { userId, guestName } = req.body;
-
-  const room = await Room.findById(roomId);
-
-  if (!room) {
-    throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
-  }
-
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
-  }
-
-  if (userId) {
-    room.umpire = {
-      user: userId,
-      isGuest: false
-    };
-  } else if (guestName) {
-    room.umpire = {
-      isGuest: true,
-      guestName,
-      guestId: uuidv4()
-    };
+  // Check authorization
+  if (room.isSoloMode) {
+    if (!room.isCreator(req.user._id)) {
+      throw new AuthorizationError('Only the creator can remove players in solo mode');
+    }
   } else {
-    room.umpire = {
-      user: req.user._id,
-      isGuest: false
-    };
+    const isTeamAIncharge = room.isTeamAIncharge(req.user._id);
+    const isTeamBIncharge = room.isTeamBIncharge(req.user._id);
+    const isCreator = room.isCreator(req.user._id);
+
+    if (team === 'teamA' && !isTeamAIncharge && !isCreator) {
+      throw new AuthorizationError('Only Team A In-charge can remove players from Team A');
+    }
+    if (team === 'teamB' && !isTeamBIncharge && !isCreator) {
+      throw new AuthorizationError('Only Team B In-charge can remove players from Team B');
+    }
   }
 
+  const targetTeam = room[team];
+  targetTeam.players = targetTeam.players.filter(p => p._id.toString() !== playerId);
+
   await room.save();
-  await room.populate('umpire.user', 'username firstName lastName fullName avatar');
 
   return successResponse(res, {
-    message: 'Umpire assigned successfully',
-    data: { umpire: room.umpire }
+    message: 'Player removed from team successfully',
+    data: { team: room[team] }
   });
 };
 
 /**
- * @desc    Mark room as ready for match (Host only)
+ * @desc    Select next batsman (Team In-charge selects who comes next)
+ * @route   POST /api/v1/rooms/:roomId/select-batsman
+ * @access  Private
+ */
+const selectNextBatsman = async (req, res) => {
+  const { roomId } = req.params;
+  const { playerId, team } = req.body;
+
+  if (!['teamA', 'teamB'].includes(team)) {
+    throw new ValidationError('Invalid team. Use teamA or teamB');
+  }
+
+  const room = await Room.findById(roomId);
+
+  if (!room) {
+    throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
+  }
+
+  if (room.status !== ROOM_STATUS.IN_MATCH) {
+    throw new ValidationError('Match is not in progress');
+  }
+
+  // Check authorization - only respective in-charge or creator in solo mode
+  if (room.isSoloMode) {
+    if (!room.isCreator(req.user._id)) {
+      throw new AuthorizationError('Only the creator can select batsman in solo mode');
+    }
+  } else {
+    if (team === 'teamA' && !room.isTeamAIncharge(req.user._id)) {
+      throw new AuthorizationError('Only Team A In-charge can select batsman for Team A');
+    }
+    if (team === 'teamB' && !room.isTeamBIncharge(req.user._id)) {
+      throw new AuthorizationError('Only Team B In-charge can select batsman for Team B');
+    }
+  }
+
+  const targetTeam = room[team];
+  const player = targetTeam.players.find(p => p._id.toString() === playerId);
+
+  if (!player) {
+    throw new NotFoundError('Player not found in team');
+  }
+
+  // This would typically update the match state - for now return success
+  return successResponse(res, {
+    message: 'Next batsman selected',
+    data: {
+      team,
+      player
+    }
+  });
+};
+
+/**
+ * @desc    Mark room as ready for match
  * @route   POST /api/v1/rooms/:roomId/ready
  * @access  Private
  */
@@ -584,16 +549,18 @@ const markRoomReady = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
+  // Only creator can mark room as ready
+  if (!room.isCreator(req.user._id)) {
+    throw new AuthorizationError('Only the room creator can mark the room as ready');
+  }
+
+  // In 3-player mode, all roles must be assigned
+  if (!room.isSoloMode && !room.rolesAssigned) {
+    throw new ValidationError('All roles must be assigned before starting');
   }
 
   if (!room.teamsReady) {
     throw new ValidationError(ERROR_MESSAGES[ERROR_CODES.TEAMS_NOT_READY]);
-  }
-
-  if (!room.umpire.user && !room.umpire.guestId) {
-    throw new ValidationError('Please assign an umpire before starting');
   }
 
   room.status = ROOM_STATUS.READY;
@@ -606,7 +573,7 @@ const markRoomReady = async (req, res) => {
 };
 
 /**
- * @desc    Kick participant (Host only)
+ * @desc    Kick participant (Creator only)
  * @route   DELETE /api/v1/rooms/:roomId/participants/:participantId
  * @access  Private
  */
@@ -619,8 +586,8 @@ const kickParticipant = async (req, res) => {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
   }
 
-  if (!room.isHost(req.user._id)) {
-    throw new AuthorizationError(ERROR_MESSAGES[ERROR_CODES.NOT_ROOM_HOST]);
+  if (!room.isCreator(req.user._id)) {
+    throw new AuthorizationError('Only the room creator can kick participants');
   }
 
   if (participantId === req.user._id.toString()) {
@@ -632,6 +599,12 @@ const kickParticipant = async (req, res) => {
   }
 
   room.removeParticipant(participantId);
+
+  // Revert to waiting if less than 3 participants
+  if (room.participants.length < 3) {
+    room.status = ROOM_STATUS.WAITING;
+  }
+
   await room.save();
 
   return successResponse(res, {
@@ -639,20 +612,55 @@ const kickParticipant = async (req, res) => {
   });
 };
 
+/**
+ * @desc    Get available roles in room
+ * @route   GET /api/v1/rooms/:roomId/roles
+ * @access  Private
+ */
+const getAvailableRoles = async (req, res) => {
+  const { roomId } = req.params;
+
+  const room = await Room.findById(roomId)
+    .populate('participants.user', 'username firstName lastName fullName avatar');
+
+  if (!room) {
+    throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.ROOM_NOT_FOUND]);
+  }
+
+  const assignedRoles = room.participants
+    .filter(p => p.role)
+    .map(p => ({ role: p.role, user: p.user }));
+
+  const availableRoles = Object.values(ROOM_ROLES).filter(
+    role => !assignedRoles.find(ar => ar.role === role)
+  );
+
+  const myRole = room.getUserRole(req.user._id);
+
+  return successResponse(res, {
+    data: {
+      availableRoles,
+      assignedRoles,
+      myRole,
+      allRolesAssigned: room.rolesAssigned
+    }
+  });
+};
+
 module.exports = {
   createRoom,
-  getAllRooms,
+  getMyRooms,
   getRoomById,
   joinRoom,
   leaveRoom,
   updateRoom,
   closeRoom,
-  addGuest,
-  removeGuest,
+  selectRole,
   setTeamNames,
-  assignToTeam,
-  removeFromTeam,
-  assignUmpire,
+  addPlayerToTeam,
+  removePlayerFromTeam,
+  selectNextBatsman,
   markRoomReady,
-  kickParticipant
+  kickParticipant,
+  getAvailableRoles
 };

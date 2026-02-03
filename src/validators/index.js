@@ -1,6 +1,6 @@
 const { body, param, query, validationResult } = require('express-validator');
 const { ValidationError } = require('../utils/errors');
-const { VALIDATION, ROLES, ACCOUNT_STATUS, MATCH_STATUS, ROOM_STATUS, TOSS_DECISIONS, BALL_OUTCOMES, DISMISSAL_TYPES } = require('../config/constants');
+const { VALIDATION, ROLES, ACCOUNT_STATUS, MATCH_STATUS, ROOM_STATUS, ROOM_ROLES, TOSS_DECISIONS, BALL_OUTCOMES, DISMISSAL_TYPES } = require('../config/constants');
 
 /**
  * Validate request and throw error if validation fails
@@ -235,44 +235,23 @@ const createRoomValidation = [
     .notEmpty().withMessage('Room name is required')
     .isLength({ min: VALIDATION.ROOM_NAME_MIN, max: VALIDATION.ROOM_NAME_MAX })
     .withMessage(`Room name must be between ${VALIDATION.ROOM_NAME_MIN} and ${VALIDATION.ROOM_NAME_MAX} characters`),
-  
+
   body('description')
     .optional()
     .trim()
     .isLength({ max: VALIDATION.DESCRIPTION_MAX })
     .withMessage(`Description cannot exceed ${VALIDATION.DESCRIPTION_MAX} characters`),
-  
+
   body('settings.overs')
     .optional()
     .isInt({ min: 1, max: 50 })
     .withMessage('Overs must be between 1 and 50'),
-  
+
   body('settings.playersPerTeam')
     .optional()
     .isInt({ min: 2, max: 11 })
     .withMessage('Players per team must be between 2 and 11'),
-  
-  body('settings.maxParticipants')
-    .optional()
-    .isInt({ min: 2, max: 30 })
-    .withMessage('Max participants must be between 2 and 30'),
-  
-  body('settings.isPrivate')
-    .optional()
-    .isBoolean()
-    .withMessage('isPrivate must be a boolean'),
-  
-  body('settings.password')
-    .optional()
-    .trim()
-    .isLength({ min: 4, max: 20 })
-    .withMessage('Room password must be between 4 and 20 characters'),
-  
-  body('settings.allowGuests')
-    .optional()
-    .isBoolean()
-    .withMessage('allowGuests must be a boolean'),
-  
+
   validate
 ];
 
@@ -283,11 +262,7 @@ const joinRoomValidation = [
     .isLength({ min: 6, max: 6 }).withMessage('Room code must be 6 characters')
     .isAlphanumeric().withMessage('Room code must be alphanumeric')
     .toUpperCase(),
-  
-  body('password')
-    .optional()
-    .trim(),
-  
+
   validate
 ];
 
@@ -314,59 +289,38 @@ const updateRoomSettingsValidation = [
   validate
 ];
 
-const assignTeamValidation = [
+const selectRoleValidation = [
   param('roomId')
     .isMongoId().withMessage('Invalid room ID'),
-  
-  body('team')
+
+  body('role')
+    .notEmpty().withMessage('Role is required')
+    .isIn(Object.values(ROOM_ROLES))
+    .withMessage(`Role must be one of: ${Object.values(ROOM_ROLES).join(', ')}`),
+
+  validate
+];
+
+const addPlayerValidation = [
+  param('roomId')
+    .isMongoId().withMessage('Invalid room ID'),
+
+  param('team')
     .notEmpty().withMessage('Team is required')
     .isIn(['teamA', 'teamB'])
     .withMessage('Team must be either teamA or teamB'),
-  
-  body('userId')
-    .optional()
-    .isMongoId().withMessage('Invalid user ID'),
-  
-  body('guestId')
-    .optional()
+
+  body('playerName')
     .trim()
-    .notEmpty().withMessage('Guest ID cannot be empty'),
-  
+    .notEmpty().withMessage('Player name is required')
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Player name must be between 2 and 50 characters'),
+
   body('isCaptain')
     .optional()
     .isBoolean()
     .withMessage('isCaptain must be a boolean'),
-  
-  validate
-];
 
-const assignUmpireValidation = [
-  param('roomId')
-    .isMongoId().withMessage('Invalid room ID'),
-  
-  body('userId')
-    .optional()
-    .isMongoId().withMessage('Invalid user ID'),
-  
-  body('guestName')
-    .optional()
-    .trim()
-    .isLength({ min: 2, max: 50 })
-    .withMessage('Guest name must be between 2 and 50 characters'),
-  
-  validate
-];
-
-const addGuestValidation = [
-  param('roomId')
-    .isMongoId().withMessage('Invalid room ID'),
-  
-  body('name')
-    .trim()
-    .notEmpty().withMessage('Guest name is required')
-    .isLength({ min: 2, max: 50 })
-    .withMessage('Guest name must be between 2 and 50 characters'),
-  
   validate
 ];
 
@@ -574,9 +528,8 @@ module.exports = {
   createRoomValidation,
   joinRoomValidation,
   updateRoomSettingsValidation,
-  assignTeamValidation,
-  assignUmpireValidation,
-  addGuestValidation,
+  selectRoleValidation,
+  addPlayerValidation,
   // Match
   conductTossValidation,
   setBatsmenValidation,

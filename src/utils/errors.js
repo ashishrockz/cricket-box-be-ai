@@ -124,10 +124,13 @@ const ERROR_CODES = {
   ROOM_FULL: 'ROOM_FULL',
   ROOM_CLOSED: 'ROOM_CLOSED',
   INVALID_ROOM_CODE: 'INVALID_ROOM_CODE',
-  INVALID_ROOM_PASSWORD: 'INVALID_ROOM_PASSWORD',
   USER_ALREADY_IN_ROOM: 'USER_ALREADY_IN_ROOM',
   USER_NOT_IN_ROOM: 'USER_NOT_IN_ROOM',
-  NOT_ROOM_HOST: 'NOT_ROOM_HOST',
+  NOT_ROOM_CREATOR: 'NOT_ROOM_CREATOR',
+  ROLE_ALREADY_TAKEN: 'ROLE_ALREADY_TAKEN',
+  INVALID_ROLE: 'INVALID_ROLE',
+  ROLES_NOT_ASSIGNED: 'ROLES_NOT_ASSIGNED',
+  NOT_TEAM_INCHARGE: 'NOT_TEAM_INCHARGE',
   
   // Match Errors
   MATCH_NOT_FOUND: 'MATCH_NOT_FOUND',
@@ -147,7 +150,7 @@ const ERROR_CODES = {
   
   // Permission Errors
   NOT_UMPIRE: 'NOT_UMPIRE',
-  NOT_HOST: 'NOT_HOST',
+  NOT_CREATOR: 'NOT_CREATOR',
   NOT_ADMIN: 'NOT_ADMIN',
   
   // Validation Errors
@@ -201,13 +204,16 @@ const ERROR_MESSAGES = {
   
   // Room
   [ERROR_CODES.ROOM_NOT_FOUND]: 'Room not found',
-  [ERROR_CODES.ROOM_FULL]: 'Room is full',
+  [ERROR_CODES.ROOM_FULL]: 'Room is full (maximum 3 participants)',
   [ERROR_CODES.ROOM_CLOSED]: 'Room is closed',
   [ERROR_CODES.INVALID_ROOM_CODE]: 'Invalid room code',
-  [ERROR_CODES.INVALID_ROOM_PASSWORD]: 'Invalid room password',
   [ERROR_CODES.USER_ALREADY_IN_ROOM]: 'You are already in this room',
   [ERROR_CODES.USER_NOT_IN_ROOM]: 'You are not a participant of this room',
-  [ERROR_CODES.NOT_ROOM_HOST]: 'Only the room host can perform this action',
+  [ERROR_CODES.NOT_ROOM_CREATOR]: 'Only the room creator can perform this action',
+  [ERROR_CODES.ROLE_ALREADY_TAKEN]: 'This role is already taken by another participant',
+  [ERROR_CODES.INVALID_ROLE]: 'Invalid role. Choose from: umpire, team_a_incharge, team_b_incharge',
+  [ERROR_CODES.ROLES_NOT_ASSIGNED]: 'All roles must be assigned before proceeding',
+  [ERROR_CODES.NOT_TEAM_INCHARGE]: 'Only the team in-charge can perform this action',
   
   // Match
   [ERROR_CODES.MATCH_NOT_FOUND]: 'Match not found',
@@ -227,7 +233,7 @@ const ERROR_MESSAGES = {
   
   // Permission
   [ERROR_CODES.NOT_UMPIRE]: 'Only the umpire can perform this action',
-  [ERROR_CODES.NOT_HOST]: 'Only the host can perform this action',
+  [ERROR_CODES.NOT_CREATOR]: 'Only the room creator can perform this action',
   [ERROR_CODES.NOT_ADMIN]: 'Admin privileges required',
   
   // General

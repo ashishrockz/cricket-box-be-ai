@@ -7,9 +7,8 @@ const {
   createRoomValidation,
   joinRoomValidation,
   updateRoomSettingsValidation,
-  assignTeamValidation,
-  assignUmpireValidation,
-  addGuestValidation,
+  selectRoleValidation,
+  addPlayerValidation,
   mongoIdValidation,
   paginationValidation
 } = require('../validators');
@@ -18,7 +17,7 @@ const {
  * @swagger
  * tags:
  *   name: Rooms
- *   description: Match room management
+ *   description: Match room management (max 3 participants per room)
  */
 
 /**
@@ -58,22 +57,9 @@ const {
  *                     minimum: 2
  *                     maximum: 11
  *                     default: 6
- *                   maxParticipants:
- *                     type: integer
- *                     minimum: 2
- *                     maximum: 30
- *                     default: 20
- *                   isPrivate:
- *                     type: boolean
- *                     default: false
- *                   password:
- *                     type: string
- *                   allowGuests:
- *                     type: boolean
- *                     default: true
  *     responses:
  *       201:
- *         description: Room created successfully
+ *         description: Room created successfully with unique code
  *       400:
  *         description: Validation error
  */
@@ -83,7 +69,7 @@ router.post('/', authenticate, roomCreationLimiter, createRoomValidation, catchA
  * @swagger
  * /api/v1/rooms:
  *   get:
- *     summary: Get all rooms
+ *     summary: Get my rooms (rooms I created or joined)
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []
@@ -102,21 +88,16 @@ router.post('/', authenticate, roomCreationLimiter, createRoomValidation, catchA
  *         name: status
  *         schema:
  *           type: string
- *           enum: [waiting, team_setup, ready, in_match, completed, closed]
- *       - in: query
- *         name: myRooms
- *         schema:
- *           type: boolean
- *         description: Get rooms user is part of
+ *           enum: [waiting, role_selection, team_setup, ready, in_match, completed, closed]
  *       - in: query
  *         name: sort
  *         schema:
  *           type: string
  *     responses:
  *       200:
- *         description: List of rooms
+ *         description: List of my rooms
  */
-router.get('/', authenticate, paginationValidation, catchAsync(roomController.getAllRooms));
+router.get('/', authenticate, paginationValidation, catchAsync(roomController.getMyRooms));
 
 /**
  * @swagger
@@ -139,15 +120,12 @@ router.get('/', authenticate, paginationValidation, catchAsync(roomController.ge
  *                 type: string
  *                 minLength: 6
  *                 maxLength: 6
- *               password:
- *                 type: string
+ *                 description: 6-character room code
  *     responses:
  *       200:
  *         description: Joined room successfully
  *       400:
- *         description: Invalid room code
- *       401:
- *         description: Invalid password for private room
+ *         description: Invalid room code or room full (max 3 participants)
  *       409:
  *         description: Already in room
  */
@@ -179,7 +157,7 @@ router.get('/:roomId', authenticate, mongoIdValidation('roomId'), catchAsync(roo
  * @swagger
  * /api/v1/rooms/{roomId}:
  *   put:
- *     summary: Update room (Host only)
+ *     summary: Update room settings (Creator only)
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []
@@ -205,7 +183,7 @@ router.get('/:roomId', authenticate, mongoIdValidation('roomId'), catchAsync(roo
  *       200:
  *         description: Room updated
  *       403:
- *         description: Host only
+ *         description: Creator only
  */
 router.put('/:roomId', authenticate, updateRoomSettingsValidation, catchAsync(roomController.updateRoom));
 
@@ -213,7 +191,7 @@ router.put('/:roomId', authenticate, updateRoomSettingsValidation, catchAsync(ro
  * @swagger
  * /api/v1/rooms/{roomId}:
  *   delete:
- *     summary: Close room (Host only)
+ *     summary: Close room (Creator only)
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []
@@ -227,7 +205,7 @@ router.put('/:roomId', authenticate, updateRoomSettingsValidation, catchAsync(ro
  *       200:
  *         description: Room closed
  *       403:
- *         description: Host only
+ *         description: Creator only
  */
 router.delete('/:roomId', authenticate, mongoIdValidation('roomId'), catchAsync(roomController.closeRoom));
 
@@ -249,15 +227,35 @@ router.delete('/:roomId', authenticate, mongoIdValidation('roomId'), catchAsync(
  *       200:
  *         description: Left room successfully
  *       400:
- *         description: Host cannot leave
+ *         description: Creator cannot leave
  */
 router.post('/:roomId/leave', authenticate, mongoIdValidation('roomId'), catchAsync(roomController.leaveRoom));
 
 /**
  * @swagger
- * /api/v1/rooms/{roomId}/guests:
+ * /api/v1/rooms/{roomId}/roles:
+ *   get:
+ *     summary: Get available and assigned roles in room
+ *     tags: [Rooms]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: roomId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Role information
+ */
+router.get('/:roomId/roles', authenticate, mongoIdValidation('roomId'), catchAsync(roomController.getAvailableRoles));
+
+/**
+ * @swagger
+ * /api/v1/rooms/{roomId}/select-role:
  *   post:
- *     summary: Add guest participant (Host only)
+ *     summary: Select your role in the room (when 3 participants)
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []
@@ -274,48 +272,25 @@ router.post('/:roomId/leave', authenticate, mongoIdValidation('roomId'), catchAs
  *           schema:
  *             type: object
  *             required:
- *               - name
+ *               - role
  *             properties:
- *               name:
+ *               role:
  *                 type: string
- *     responses:
- *       201:
- *         description: Guest added
- *       403:
- *         description: Host only
- */
-router.post('/:roomId/guests', authenticate, addGuestValidation, catchAsync(roomController.addGuest));
-
-/**
- * @swagger
- * /api/v1/rooms/{roomId}/guests/{guestId}:
- *   delete:
- *     summary: Remove guest (Host only)
- *     tags: [Rooms]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: roomId
- *         required: true
- *         schema:
- *           type: string
- *       - in: path
- *         name: guestId
- *         required: true
- *         schema:
- *           type: string
+ *                 enum: [umpire, team_a_incharge, team_b_incharge]
+ *                 description: Role to select
  *     responses:
  *       200:
- *         description: Guest removed
+ *         description: Role assigned successfully
+ *       400:
+ *         description: Role already taken or invalid
  */
-router.delete('/:roomId/guests/:guestId', authenticate, catchAsync(roomController.removeGuest));
+router.post('/:roomId/select-role', authenticate, selectRoleValidation, catchAsync(roomController.selectRole));
 
 /**
  * @swagger
  * /api/v1/rooms/{roomId}/teams:
  *   put:
- *     summary: Set team names (Host only)
+ *     summary: Set team names
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []
@@ -339,51 +314,13 @@ router.delete('/:roomId/guests/:guestId', authenticate, catchAsync(roomControlle
  *       200:
  *         description: Team names updated
  */
-router.put('/:roomId/teams', authenticate, catchAsync(roomController.setTeamNames));
+router.put('/:roomId/teams', authenticate, mongoIdValidation('roomId'), catchAsync(roomController.setTeamNames));
 
 /**
  * @swagger
- * /api/v1/rooms/{roomId}/teams/assign:
+ * /api/v1/rooms/{roomId}/teams/{team}/players:
  *   post:
- *     summary: Assign player to team (Host only)
- *     tags: [Rooms]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: roomId
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - team
- *             properties:
- *               team:
- *                 type: string
- *                 enum: [teamA, teamB]
- *               userId:
- *                 type: string
- *               guestId:
- *                 type: string
- *               isCaptain:
- *                 type: boolean
- *     responses:
- *       200:
- *         description: Player assigned
- */
-router.post('/:roomId/teams/assign', authenticate, assignTeamValidation, catchAsync(roomController.assignToTeam));
-
-/**
- * @swagger
- * /api/v1/rooms/{roomId}/teams/{team}/player:
- *   delete:
- *     summary: Remove player from team (Host only)
+ *     summary: Add player to team (In-charge adds player names)
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []
@@ -400,26 +337,64 @@ router.post('/:roomId/teams/assign', authenticate, assignTeamValidation, catchAs
  *           type: string
  *           enum: [teamA, teamB]
  *     requestBody:
+ *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - playerName
  *             properties:
- *               userId:
+ *               playerName:
  *                 type: string
- *               guestId:
- *                 type: string
+ *                 description: Name of the player to add
+ *               isCaptain:
+ *                 type: boolean
+ *                 default: false
+ *     responses:
+ *       201:
+ *         description: Player added to team
+ *       403:
+ *         description: Only respective In-charge can add players
+ */
+router.post('/:roomId/teams/:team/players', authenticate, addPlayerValidation, catchAsync(roomController.addPlayerToTeam));
+
+/**
+ * @swagger
+ * /api/v1/rooms/{roomId}/teams/{team}/players/{playerId}:
+ *   delete:
+ *     summary: Remove player from team
+ *     tags: [Rooms]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: roomId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: team
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [teamA, teamB]
+ *       - in: path
+ *         name: playerId
+ *         required: true
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
  *         description: Player removed from team
  */
-router.delete('/:roomId/teams/:team/player', authenticate, catchAsync(roomController.removeFromTeam));
+router.delete('/:roomId/teams/:team/players/:playerId', authenticate, catchAsync(roomController.removePlayerFromTeam));
 
 /**
  * @swagger
- * /api/v1/rooms/{roomId}/umpire:
+ * /api/v1/rooms/{roomId}/select-batsman:
  *   post:
- *     summary: Assign umpire (Host only)
+ *     summary: Select next batsman (Team In-charge selects who comes next)
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []
@@ -430,26 +405,31 @@ router.delete('/:roomId/teams/:team/player', authenticate, catchAsync(roomContro
  *         schema:
  *           type: string
  *     requestBody:
+ *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - playerId
+ *               - team
  *             properties:
- *               userId:
+ *               playerId:
  *                 type: string
- *               guestName:
+ *               team:
  *                 type: string
+ *                 enum: [teamA, teamB]
  *     responses:
  *       200:
- *         description: Umpire assigned
+ *         description: Next batsman selected
  */
-router.post('/:roomId/umpire', authenticate, assignUmpireValidation, catchAsync(roomController.assignUmpire));
+router.post('/:roomId/select-batsman', authenticate, catchAsync(roomController.selectNextBatsman));
 
 /**
  * @swagger
  * /api/v1/rooms/{roomId}/ready:
  *   post:
- *     summary: Mark room ready for match (Host only)
+ *     summary: Mark room ready for match (Creator only)
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []
@@ -463,7 +443,7 @@ router.post('/:roomId/umpire', authenticate, assignUmpireValidation, catchAsync(
  *       200:
  *         description: Room ready
  *       400:
- *         description: Teams not ready
+ *         description: Teams not ready or roles not assigned
  */
 router.post('/:roomId/ready', authenticate, mongoIdValidation('roomId'), catchAsync(roomController.markRoomReady));
 
@@ -471,7 +451,7 @@ router.post('/:roomId/ready', authenticate, mongoIdValidation('roomId'), catchAs
  * @swagger
  * /api/v1/rooms/{roomId}/participants/{participantId}:
  *   delete:
- *     summary: Kick participant (Host only)
+ *     summary: Kick participant (Creator only)
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []
@@ -496,7 +476,7 @@ router.delete('/:roomId/participants/:participantId', authenticate, catchAsync(r
  * @swagger
  * /api/v1/rooms/{roomId}/match/start:
  *   post:
- *     summary: Start a match (Host only)
+ *     summary: Start a match (Creator only)
  *     tags: [Rooms]
  *     security:
  *       - bearerAuth: []

@@ -30,11 +30,19 @@ module.exports = {
   // Room Status
   ROOM_STATUS: {
     WAITING: 'waiting',
+    ROLE_SELECTION: 'role_selection',
     TEAM_SETUP: 'team_setup',
     READY: 'ready',
     IN_MATCH: 'in_match',
     COMPLETED: 'completed',
     CLOSED: 'closed'
+  },
+
+  // Room Participant Roles (for 3-player rooms)
+  ROOM_ROLES: {
+    UMPIRE: 'umpire',
+    TEAM_A_INCHARGE: 'team_a_incharge',
+    TEAM_B_INCHARGE: 'team_b_incharge'
   },
 
   // Innings Status
@@ -93,7 +101,7 @@ module.exports = {
   DEFAULTS: {
     OVERS: parseInt(process.env.DEFAULT_OVERS) || 6,
     PLAYERS_PER_TEAM: parseInt(process.env.DEFAULT_PLAYERS_PER_TEAM) || 6,
-    MAX_PLAYERS_PER_ROOM: parseInt(process.env.MAX_PLAYERS_PER_ROOM) || 20,
+    MAX_PARTICIPANTS_PER_ROOM: 3, // Fixed: Creator + 2 friends
     BALLS_PER_OVER: 6
   },
 

@@ -4,7 +4,7 @@ const connectDB = async () => {
   try {
     const mongoURI = process.env.NODE_ENV === 'test' 
       ? process.env.MONGODB_URI_TEST 
-      : process.env.MONGODB_URI;
+      : process.env.MONGODB_URL;
 
     const conn = await mongoose.connect(mongoURI, {
       maxPoolSize: 10,

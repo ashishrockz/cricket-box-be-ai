@@ -9,27 +9,33 @@ const options = {
       description: `
 ## Cricket Box - Digital Box Cricket Management Platform
 
-Cricket Box is a comprehensive digital platform for organizing, playing, officiating, and analyzing box cricket matches.
+Cricket Box is a comprehensive digital platform for organizing, playing, officiating, and analyzing box cricket matches between friends.
 
 ### Features:
-- **Room Management**: Create and join match rooms with customizable settings
-- **Team Setup**: Assign players to teams, set captains, and manage guest players
+- **Room Management**: Create rooms with unique codes, share with friends (max 3 participants)
+- **Role Selection**: When 3 friends join, each selects a role (Umpire, Team A In-charge, Team B In-charge)
+- **Solo Mode**: If playing alone, creator controls everything
+- **Team Setup**: In-charges add player names to their respective teams
 - **Live Scoring**: Real-time ball-by-ball scoring with instant updates
 - **Player Statistics**: Automatic tracking of batting, bowling, and fielding stats
-- **Leaderboards**: Global rankings based on various performance metrics
-- **Admin Dashboard**: Platform monitoring and user management
+- **Friend Leaderboards**: Rankings between friends based on performance
+
+### Room Flow:
+1. **Create Room** - Get a 6-character code to share with friends
+2. **Join Room** - Friends join using the code (max 3 participants including creator)
+3. **Select Roles** - Each participant picks: Umpire, Team A In-charge, or Team B In-charge
+4. **Add Players** - Each In-charge adds player names to their team
+5. **Start Match** - Umpire controls scoring, In-charges select next batsmen
 
 ### Authentication:
 - Email + Password login
 - OTP-based login for password recovery
 - JWT-based authorization with refresh tokens
 
-### Roles:
-- **Admin**: Full platform control
-- **Host**: Room creator with team management privileges
-- **Player**: Registered user who can join matches
-- **Umpire**: Match officiator who controls scoring
-- **Viewer**: Read-only access to public matches
+### Roles in Room:
+- **Umpire**: Controls match scoring and officiating
+- **Team A In-charge**: Manages Team A players and selects next batsman
+- **Team B In-charge**: Manages Team B players and selects next batsman
       `,
       contact: {
         name: 'Cricket Box Support',
@@ -97,29 +103,54 @@ Cricket Box is a comprehensive digital platform for organizing, playing, officia
           properties: {
             id: { type: 'string', format: 'objectId' },
             name: { type: 'string' },
-            code: { type: 'string', minLength: 6, maxLength: 6 },
+            code: { type: 'string', minLength: 6, maxLength: 6, description: 'Unique 6-character room code for joining' },
             description: { type: 'string' },
-            host: { $ref: '#/components/schemas/User' },
-            status: { type: 'string', enum: ['waiting', 'team_setup', 'ready', 'in_match', 'completed', 'closed'] },
+            creator: { $ref: '#/components/schemas/User' },
+            status: {
+              type: 'string',
+              enum: ['waiting', 'role_selection', 'team_setup', 'ready', 'in_match', 'completed', 'closed'],
+              description: 'waiting: <3 participants, role_selection: 3 participants choosing roles, team_setup: adding players'
+            },
             settings: { $ref: '#/components/schemas/RoomSettings' },
+            participants: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/RoomParticipant' },
+              maxItems: 3,
+              description: 'Maximum 3 participants including creator'
+            },
             teamA: { $ref: '#/components/schemas/Team' },
-            teamB: { $ref: '#/components/schemas/Team' }
+            teamB: { $ref: '#/components/schemas/Team' },
+            isSoloMode: { type: 'boolean', description: 'True if only creator is in room' },
+            rolesAssigned: { type: 'boolean', description: 'True if all 3 roles are assigned' }
+          }
+        },
+        RoomParticipant: {
+          type: 'object',
+          properties: {
+            user: { $ref: '#/components/schemas/User' },
+            joinedAt: { type: 'string', format: 'date-time' },
+            role: {
+              type: 'string',
+              enum: ['umpire', 'team_a_incharge', 'team_b_incharge', null],
+              description: 'Role selected by participant (null if not yet selected)'
+            },
+            isReady: { type: 'boolean' }
           }
         },
         RoomSettings: {
           type: 'object',
           properties: {
-            overs: { type: 'integer', default: 6 },
-            playersPerTeam: { type: 'integer', default: 6 },
-            maxParticipants: { type: 'integer', default: 20 },
-            isPrivate: { type: 'boolean', default: false },
-            allowGuests: { type: 'boolean', default: true }
+            overs: { type: 'integer', default: 6, minimum: 1, maximum: 50 },
+            playersPerTeam: { type: 'integer', default: 6, minimum: 2, maximum: 11 },
+            wideRuns: { type: 'integer', default: 1, minimum: 1, maximum: 2 },
+            noBallRuns: { type: 'integer', default: 1, minimum: 1, maximum: 2 },
+            noBallFreehit: { type: 'boolean', default: true }
           }
         },
         Team: {
           type: 'object',
           properties: {
-            name: { type: 'string' },
+            name: { type: 'string', default: 'Team A/B' },
             players: {
               type: 'array',
               items: { $ref: '#/components/schemas/TeamPlayer' }
@@ -129,10 +160,29 @@ Cricket Box is a comprehensive digital platform for organizing, playing, officia
         TeamPlayer: {
           type: 'object',
           properties: {
-            user: { type: 'string', format: 'objectId' },
-            isGuest: { type: 'boolean' },
-            guestName: { type: 'string' },
-            isCaptain: { type: 'boolean' }
+            _id: { type: 'string', format: 'objectId' },
+            name: { type: 'string', description: 'Player name added by In-charge' },
+            isCaptain: { type: 'boolean', default: false },
+            addedBy: { type: 'string', format: 'objectId', description: 'User ID of the In-charge who added this player' }
+          }
+        },
+        RoleSelection: {
+          type: 'object',
+          required: ['role'],
+          properties: {
+            role: {
+              type: 'string',
+              enum: ['umpire', 'team_a_incharge', 'team_b_incharge'],
+              description: 'Role to select'
+            }
+          }
+        },
+        AddPlayer: {
+          type: 'object',
+          required: ['playerName'],
+          properties: {
+            playerName: { type: 'string', minLength: 2, maxLength: 50 },
+            isCaptain: { type: 'boolean', default: false }
           }
         },
         Match: {
@@ -281,13 +331,22 @@ Cricket Box is a comprehensive digital platform for organizing, playing, officia
               schema: { $ref: '#/components/schemas/Error' }
             }
           }
+        },
+        RoomFullError: {
+          description: 'Room is full (maximum 3 participants)',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/Error' }
+            }
+          }
         }
       }
     },
     tags: [
       { name: 'Authentication', description: 'User authentication and authorization' },
       { name: 'Users', description: 'User management and statistics' },
-      { name: 'Rooms', description: 'Match room management' },
+      { name: 'Friends', description: 'Friend management and leaderboards' },
+      { name: 'Rooms', description: 'Match room management (max 3 participants)' },
       { name: 'Matches', description: 'Match management and live scoring' },
       { name: 'Admin', description: 'Administrative operations' }
     ]

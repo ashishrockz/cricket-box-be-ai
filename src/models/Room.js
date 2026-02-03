@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { ROOM_STATUS, DEFAULTS, VALIDATION } = require('../config/constants');
+const { ROOM_STATUS, ROOM_ROLES, DEFAULTS, VALIDATION } = require('../config/constants');
 
 const roomSchema = new mongoose.Schema({
   name: {
@@ -19,10 +19,10 @@ const roomSchema = new mongoose.Schema({
     type: String,
     maxlength: [VALIDATION.DESCRIPTION_MAX, `Description cannot exceed ${VALIDATION.DESCRIPTION_MAX} characters`]
   },
-  host: {
+  creator: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: [true, 'Room host is required']
+    required: [true, 'Room creator is required']
   },
   status: {
     type: String,
@@ -32,52 +32,31 @@ const roomSchema = new mongoose.Schema({
     },
     default: ROOM_STATUS.WAITING
   },
+  // Participants array - max 3 users (including creator)
   participants: [{
     user: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    joinedAt: {
-      type: Date,
-      default: Date.now
-    },
-    isReady: {
-      type: Boolean,
-      default: false
-    }
-  }],
-  // Guest participants (non-registered users)
-  guestParticipants: [{
-    name: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    joinedAt: {
-      type: Date,
-      default: Date.now
-    },
-    isReady: {
-      type: Boolean,
-      default: false
-    },
-    guestId: {
-      type: String,
+      ref: 'User',
       required: true
-    }
-  }],
-  umpire: {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
     },
-    isGuest: {
+    joinedAt: {
+      type: Date,
+      default: Date.now
+    },
+    role: {
+      type: String,
+      enum: {
+        values: [...Object.values(ROOM_ROLES), null],
+        message: 'Invalid participant role'
+      },
+      default: null
+    },
+    isReady: {
       type: Boolean,
       default: false
-    },
-    guestName: String,
-    guestId: String
-  },
+    }
+  }],
+  // Match settings
   settings: {
     overs: {
       type: Number,
@@ -90,28 +69,6 @@ const roomSchema = new mongoose.Schema({
       default: DEFAULTS.PLAYERS_PER_TEAM,
       min: [2, 'Minimum 2 players per team'],
       max: [11, 'Maximum 11 players per team']
-    },
-    maxParticipants: {
-      type: Number,
-      default: DEFAULTS.MAX_PLAYERS_PER_ROOM,
-      min: [2, 'Minimum 2 participants'],
-      max: [30, 'Maximum 30 participants']
-    },
-    isPrivate: {
-      type: Boolean,
-      default: false
-    },
-    password: {
-      type: String,
-      select: false
-    },
-    allowGuests: {
-      type: Boolean,
-      default: true
-    },
-    autoAssignTeams: {
-      type: Boolean,
-      default: false
     },
     wideRuns: {
       type: Number,
@@ -130,6 +87,7 @@ const roomSchema = new mongoose.Schema({
       default: true
     }
   },
+  // Team A - players added by Team A In-charge
   teamA: {
     name: {
       type: String,
@@ -138,22 +96,22 @@ const roomSchema = new mongoose.Schema({
       maxlength: [VALIDATION.TEAM_NAME_MAX, `Team name cannot exceed ${VALIDATION.TEAM_NAME_MAX} characters`]
     },
     players: [{
-      user: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
+      name: {
+        type: String,
+        required: true,
+        trim: true
       },
-      isGuest: {
-        type: Boolean,
-        default: false
-      },
-      guestName: String,
-      guestId: String,
       isCaptain: {
         type: Boolean,
         default: false
+      },
+      addedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
       }
     }]
   },
+  // Team B - players added by Team B In-charge
   teamB: {
     name: {
       type: String,
@@ -162,19 +120,18 @@ const roomSchema = new mongoose.Schema({
       maxlength: [VALIDATION.TEAM_NAME_MAX, `Team name cannot exceed ${VALIDATION.TEAM_NAME_MAX} characters`]
     },
     players: [{
-      user: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
+      name: {
+        type: String,
+        required: true,
+        trim: true
       },
-      isGuest: {
-        type: Boolean,
-        default: false
-      },
-      guestName: String,
-      guestId: String,
       isCaptain: {
         type: Boolean,
         default: false
+      },
+      addedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
       }
     }]
   },
@@ -198,15 +155,15 @@ const roomSchema = new mongoose.Schema({
 
 // Indexes
 roomSchema.index({ code: 1 }, { unique: true });
-roomSchema.index({ host: 1 });
+roomSchema.index({ creator: 1 });
 roomSchema.index({ status: 1 });
 roomSchema.index({ 'participants.user': 1 });
 roomSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 roomSchema.index({ createdAt: -1 });
 
 // Virtual for total participants count
-roomSchema.virtual('totalParticipants').get(function() {
-  return this.participants.length + this.guestParticipants.length;
+roomSchema.virtual('participantCount').get(function() {
+  return this.participants.length;
 });
 
 // Virtual for team A player count
@@ -219,15 +176,29 @@ roomSchema.virtual('teamBCount').get(function() {
   return this.teamB.players.length;
 });
 
-// Virtual to check if room is full
+// Virtual to check if room is full (max 3 participants)
 roomSchema.virtual('isFull').get(function() {
-  return this.totalParticipants >= this.settings.maxParticipants;
+  return this.participants.length >= DEFAULTS.MAX_PARTICIPANTS_PER_ROOM;
+});
+
+// Virtual to check if all roles are assigned
+roomSchema.virtual('rolesAssigned').get(function() {
+  if (this.participants.length < 3) return false;
+  const roles = this.participants.map(p => p.role).filter(r => r !== null);
+  return roles.includes(ROOM_ROLES.UMPIRE) &&
+         roles.includes(ROOM_ROLES.TEAM_A_INCHARGE) &&
+         roles.includes(ROOM_ROLES.TEAM_B_INCHARGE);
 });
 
 // Virtual to check if teams are ready
 roomSchema.virtual('teamsReady').get(function() {
   return this.teamA.players.length >= this.settings.playersPerTeam &&
          this.teamB.players.length >= this.settings.playersPerTeam;
+});
+
+// Virtual to check if room is in solo mode (only creator)
+roomSchema.virtual('isSoloMode').get(function() {
+  return this.participants.length === 1;
 });
 
 // Pre-save middleware to generate room code
@@ -238,30 +209,30 @@ roomSchema.pre('save', async function(next) {
   next();
 });
 
-// Generate unique room code
+// Generate unique 6-character room code
 async function generateUniqueRoomCode() {
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code;
   let isUnique = false;
-  
+
   while (!isUnique) {
     code = '';
     for (let i = 0; i < 6; i++) {
       code += characters.charAt(Math.floor(Math.random() * characters.length));
     }
-    
+
     const existingRoom = await mongoose.model('Room').findOne({ code });
     if (!existingRoom) {
       isUnique = true;
     }
   }
-  
+
   return code;
 }
 
-// Instance method to check if user is host
-roomSchema.methods.isHost = function(userId) {
-  return this.host.toString() === userId.toString();
+// Instance method to check if user is creator
+roomSchema.methods.isCreator = function(userId) {
+  return this.creator.toString() === userId.toString();
 };
 
 // Instance method to check if user is participant
@@ -269,59 +240,83 @@ roomSchema.methods.isParticipant = function(userId) {
   return this.participants.some(p => p.user && p.user.toString() === userId.toString());
 };
 
-// Instance method to check if user is in a team
-roomSchema.methods.isInTeam = function(userId) {
-  const inTeamA = this.teamA.players.some(p => p.user && p.user.toString() === userId.toString());
-  const inTeamB = this.teamB.players.some(p => p.user && p.user.toString() === userId.toString());
-  return inTeamA || inTeamB;
-};
-
-// Instance method to get user's team
-roomSchema.methods.getUserTeam = function(userId) {
-  if (this.teamA.players.some(p => p.user && p.user.toString() === userId.toString())) {
-    return 'teamA';
-  }
-  if (this.teamB.players.some(p => p.user && p.user.toString() === userId.toString())) {
-    return 'teamB';
-  }
-  return null;
+// Instance method to get user's role in room
+roomSchema.methods.getUserRole = function(userId) {
+  const participant = this.participants.find(p => p.user && p.user.toString() === userId.toString());
+  return participant ? participant.role : null;
 };
 
 // Instance method to check if user is umpire
 roomSchema.methods.isUmpire = function(userId) {
-  return this.umpire.user && this.umpire.user.toString() === userId.toString();
+  return this.getUserRole(userId) === ROOM_ROLES.UMPIRE;
+};
+
+// Instance method to check if user is Team A In-charge
+roomSchema.methods.isTeamAIncharge = function(userId) {
+  return this.getUserRole(userId) === ROOM_ROLES.TEAM_A_INCHARGE;
+};
+
+// Instance method to check if user is Team B In-charge
+roomSchema.methods.isTeamBIncharge = function(userId) {
+  return this.getUserRole(userId) === ROOM_ROLES.TEAM_B_INCHARGE;
+};
+
+// Instance method to check if user can manage (creator in solo mode OR has assigned role)
+roomSchema.methods.canManage = function(userId) {
+  if (this.isSoloMode && this.isCreator(userId)) {
+    return true;
+  }
+  return this.getUserRole(userId) !== null;
 };
 
 // Instance method to add participant
 roomSchema.methods.addParticipant = function(userId) {
   if (this.isFull) {
-    throw new Error('Room is full');
+    throw new Error('Room is full (maximum 3 participants)');
   }
-  
+
   if (this.isParticipant(userId)) {
     throw new Error('User is already a participant');
   }
-  
+
   this.participants.push({
     user: userId,
     joinedAt: new Date(),
+    role: null,
     isReady: false
   });
 };
 
 // Instance method to remove participant
 roomSchema.methods.removeParticipant = function(userId) {
+  const participant = this.participants.find(p => p.user && p.user.toString() === userId.toString());
+  if (participant && participant.role) {
+    // Clear the role assignment
+    participant.role = null;
+  }
   this.participants = this.participants.filter(
     p => p.user && p.user.toString() !== userId.toString()
   );
-  
-  // Also remove from teams
-  this.teamA.players = this.teamA.players.filter(
-    p => p.user && p.user.toString() !== userId.toString()
-  );
-  this.teamB.players = this.teamB.players.filter(
-    p => p.user && p.user.toString() !== userId.toString()
-  );
+};
+
+// Instance method to assign role to participant
+roomSchema.methods.assignRole = function(userId, role) {
+  if (!Object.values(ROOM_ROLES).includes(role)) {
+    throw new Error('Invalid role');
+  }
+
+  // Check if role is already taken
+  const existingWithRole = this.participants.find(p => p.role === role);
+  if (existingWithRole && existingWithRole.user.toString() !== userId.toString()) {
+    throw new Error(`Role ${role} is already assigned to another participant`);
+  }
+
+  const participant = this.participants.find(p => p.user && p.user.toString() === userId.toString());
+  if (!participant) {
+    throw new Error('User is not a participant');
+  }
+
+  participant.role = role;
 };
 
 const Room = mongoose.model('Room', roomSchema);
