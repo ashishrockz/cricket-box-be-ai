@@ -6,6 +6,8 @@ const userRoutes = require('./user.routes');
 const roomRoutes = require('./room.routes');
 const matchRoutes = require('./match.routes');
 const adminRoutes = require('./admin.routes');
+const friendRoutes = require('./friend.routes');
+const notificationRoutes = require('./notification.routes');
 
 // Health check endpoint
 router.get('/health', (req, res) => {
@@ -23,5 +25,7 @@ router.use('/users', userRoutes);
 router.use('/rooms', roomRoutes);
 router.use('/matches', matchRoutes);
 router.use('/admin', adminRoutes);
+router.use('/friends', friendRoutes);
+router.use('/notifications', notificationRoutes);
 
 module.exports = router;

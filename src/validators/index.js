@@ -483,12 +483,58 @@ const setNewBatsmanValidation = [
   validate
 ];
 
+// ==================== FRIEND VALIDATIONS ====================
+
+const sendFriendRequestValidation = [
+  param('userId')
+    .isMongoId().withMessage('Invalid user ID'),
+
+  body('message')
+    .optional()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage('Message cannot exceed 200 characters'),
+
+  validate
+];
+
+const blockUserValidation = [
+  param('userId')
+    .isMongoId().withMessage('Invalid user ID'),
+
+  body('reason')
+    .optional()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage('Reason cannot exceed 200 characters'),
+
+  validate
+];
+
+const forceRemoveFriendshipValidation = [
+  body('userId1')
+    .notEmpty().withMessage('userId1 is required')
+    .isMongoId().withMessage('Invalid userId1'),
+
+  body('userId2')
+    .notEmpty().withMessage('userId2 is required')
+    .isMongoId().withMessage('Invalid userId2'),
+
+  body('reason')
+    .optional()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage('Reason cannot exceed 200 characters'),
+
+  validate
+];
+
 // ==================== COMMON VALIDATIONS ====================
 
 const mongoIdValidation = (paramName = 'id') => [
   param(paramName)
     .isMongoId().withMessage(`Invalid ${paramName}`),
-  
+
   validate
 ];
 
@@ -537,6 +583,10 @@ module.exports = {
   setBowlerValidation,
   recordBallValidation,
   setNewBatsmanValidation,
+  // Friend
+  sendFriendRequestValidation,
+  blockUserValidation,
+  forceRemoveFriendshipValidation,
   // Common
   mongoIdValidation,
   paginationValidation

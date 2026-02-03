@@ -260,4 +260,72 @@ router.get('/audit-logs', catchAsync(adminController.getAuditLogs));
  */
 router.get('/config', catchAsync(adminController.getPlatformConfig));
 
+/**
+ * @swagger
+ * /api/v1/admin/friendship-stats:
+ *   get:
+ *     summary: Get friendship statistics
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Friendship statistics (total friendships, pending requests, blocked users)
+ */
+router.get('/friendship-stats', catchAsync(adminController.getFriendshipStats));
+
+/**
+ * @swagger
+ * /api/v1/admin/users/{userId}/relationships:
+ *   get:
+ *     summary: Get user's relationships (friends, requests, blocked)
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User relationships
+ *       404:
+ *         description: User not found
+ */
+router.get('/users/:userId/relationships', mongoIdValidation('userId'), catchAsync(adminController.getUserRelationships));
+
+/**
+ * @swagger
+ * /api/v1/admin/friendships:
+ *   delete:
+ *     summary: Force remove friendship between users
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId1
+ *               - userId2
+ *             properties:
+ *               userId1:
+ *                 type: string
+ *               userId2:
+ *                 type: string
+ *               reason:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Friendship removed
+ *       404:
+ *         description: User not found
+ */
+router.delete('/friendships', catchAsync(adminController.forceRemoveFriendship));
+
 module.exports = router;
