@@ -52,7 +52,7 @@ Cricket Box is a comprehensive digital platform for organizing, playing, officia
         description: 'Development server'
       },
       {
-        url: 'https://api.cricketbox.com',
+        url: 'https://cricket-box-be-ai.onrender.com',
         description: 'Production server'
       }
     ],
