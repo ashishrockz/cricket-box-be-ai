@@ -33,17 +33,18 @@ const apiLimiter = createRateLimiter();
  */
 const authLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   message: 'Too many authentication attempts, please try again after 15 minutes'
 });
 
 /**
- * Login rate limiter (very strict)
- * 5 login attempts per 15 minutes
+ * Login rate limiter
+ * 100 login attempts per 15 minutes (relaxed for development)
+ * TODO: Change back to 5 for production
  */
 const loginLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 100,
   message: 'Too many login attempts, please try again after 15 minutes'
 });
 
@@ -53,7 +54,7 @@ const loginLimiter = createRateLimiter({
  */
 const otpLimiter = createRateLimiter({
   windowMs: 10 * 60 * 1000,
-  max: 3,
+  max: 10,
   message: 'Too many OTP requests, please try again after 10 minutes'
 });
 
@@ -63,7 +64,7 @@ const otpLimiter = createRateLimiter({
  */
 const passwordResetLimiter = createRateLimiter({
   windowMs: 60 * 60 * 1000,
-  max: 3,
+  max: 10,
   message: 'Too many password reset attempts, please try again after an hour'
 });
 
@@ -73,7 +74,7 @@ const passwordResetLimiter = createRateLimiter({
  */
 const registrationLimiter = createRateLimiter({
   windowMs: 60 * 60 * 1000,
-  max: 5,
+  max: 10,
   message: 'Too many accounts created from this IP, please try again after an hour'
 });
 
@@ -93,7 +94,7 @@ const scoringLimiter = createRateLimiter({
  */
 const roomCreationLimiter = createRateLimiter({
   windowMs: 60 * 60 * 1000,
-  max: 10,
+  max: 100,
   message: 'Too many rooms created, please try again later'
 });
 
