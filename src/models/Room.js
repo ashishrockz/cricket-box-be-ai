@@ -12,8 +12,7 @@ const roomSchema = new mongoose.Schema({
   code: {
     type: String,
     unique: true,
-    uppercase: true,
-    required: true
+    uppercase: true
   },
   description: {
     type: String,
@@ -162,47 +161,47 @@ roomSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 roomSchema.index({ createdAt: -1 });
 
 // Virtual for total participants count
-roomSchema.virtual('participantCount').get(function() {
+roomSchema.virtual('participantCount').get(function () {
   return this.participants.length;
 });
 
 // Virtual for team A player count
-roomSchema.virtual('teamACount').get(function() {
+roomSchema.virtual('teamACount').get(function () {
   return this.teamA.players.length;
 });
 
 // Virtual for team B player count
-roomSchema.virtual('teamBCount').get(function() {
+roomSchema.virtual('teamBCount').get(function () {
   return this.teamB.players.length;
 });
 
 // Virtual to check if room is full (max 3 participants)
-roomSchema.virtual('isFull').get(function() {
+roomSchema.virtual('isFull').get(function () {
   return this.participants.length >= DEFAULTS.MAX_PARTICIPANTS_PER_ROOM;
 });
 
 // Virtual to check if all roles are assigned
-roomSchema.virtual('rolesAssigned').get(function() {
+roomSchema.virtual('rolesAssigned').get(function () {
   if (this.participants.length < 3) return false;
   const roles = this.participants.map(p => p.role).filter(r => r !== null);
   return roles.includes(ROOM_ROLES.UMPIRE) &&
-         roles.includes(ROOM_ROLES.TEAM_A_INCHARGE) &&
-         roles.includes(ROOM_ROLES.TEAM_B_INCHARGE);
+    roles.includes(ROOM_ROLES.TEAM_A_INCHARGE) &&
+    roles.includes(ROOM_ROLES.TEAM_B_INCHARGE);
 });
 
 // Virtual to check if teams are ready
-roomSchema.virtual('teamsReady').get(function() {
+roomSchema.virtual('teamsReady').get(function () {
   return this.teamA.players.length >= this.settings.playersPerTeam &&
-         this.teamB.players.length >= this.settings.playersPerTeam;
+    this.teamB.players.length >= this.settings.playersPerTeam;
 });
 
 // Virtual to check if room is in solo mode (only creator)
-roomSchema.virtual('isSoloMode').get(function() {
+roomSchema.virtual('isSoloMode').get(function () {
   return this.participants.length === 1;
 });
 
-// Pre-save middleware to generate room code
-roomSchema.pre('save', async function(next) {
+// Pre-validate middleware to generate room code
+roomSchema.pre('validate', async function (next) {
   if (this.isNew && !this.code) {
     this.code = await generateUniqueRoomCode();
   }
@@ -231,38 +230,38 @@ async function generateUniqueRoomCode() {
 }
 
 // Instance method to check if user is creator
-roomSchema.methods.isCreator = function(userId) {
+roomSchema.methods.isCreator = function (userId) {
   return this.creator.toString() === userId.toString();
 };
 
 // Instance method to check if user is participant
-roomSchema.methods.isParticipant = function(userId) {
+roomSchema.methods.isParticipant = function (userId) {
   return this.participants.some(p => p.user && p.user.toString() === userId.toString());
 };
 
 // Instance method to get user's role in room
-roomSchema.methods.getUserRole = function(userId) {
+roomSchema.methods.getUserRole = function (userId) {
   const participant = this.participants.find(p => p.user && p.user.toString() === userId.toString());
   return participant ? participant.role : null;
 };
 
 // Instance method to check if user is umpire
-roomSchema.methods.isUmpire = function(userId) {
+roomSchema.methods.isUmpire = function (userId) {
   return this.getUserRole(userId) === ROOM_ROLES.UMPIRE;
 };
 
 // Instance method to check if user is Team A In-charge
-roomSchema.methods.isTeamAIncharge = function(userId) {
+roomSchema.methods.isTeamAIncharge = function (userId) {
   return this.getUserRole(userId) === ROOM_ROLES.TEAM_A_INCHARGE;
 };
 
 // Instance method to check if user is Team B In-charge
-roomSchema.methods.isTeamBIncharge = function(userId) {
+roomSchema.methods.isTeamBIncharge = function (userId) {
   return this.getUserRole(userId) === ROOM_ROLES.TEAM_B_INCHARGE;
 };
 
 // Instance method to check if user can manage (creator in solo mode OR has assigned role)
-roomSchema.methods.canManage = function(userId) {
+roomSchema.methods.canManage = function (userId) {
   if (this.isSoloMode && this.isCreator(userId)) {
     return true;
   }
@@ -270,7 +269,7 @@ roomSchema.methods.canManage = function(userId) {
 };
 
 // Instance method to add participant
-roomSchema.methods.addParticipant = function(userId) {
+roomSchema.methods.addParticipant = function (userId) {
   if (this.isFull) {
     throw new Error('Room is full (maximum 3 participants)');
   }
@@ -288,7 +287,7 @@ roomSchema.methods.addParticipant = function(userId) {
 };
 
 // Instance method to remove participant
-roomSchema.methods.removeParticipant = function(userId) {
+roomSchema.methods.removeParticipant = function (userId) {
   const participant = this.participants.find(p => p.user && p.user.toString() === userId.toString());
   if (participant && participant.role) {
     // Clear the role assignment
@@ -300,7 +299,7 @@ roomSchema.methods.removeParticipant = function(userId) {
 };
 
 // Instance method to assign role to participant
-roomSchema.methods.assignRole = function(userId, role) {
+roomSchema.methods.assignRole = function (userId, role) {
   if (!Object.values(ROOM_ROLES).includes(role)) {
     throw new Error('Invalid role');
   }
