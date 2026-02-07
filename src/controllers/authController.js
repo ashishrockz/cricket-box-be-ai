@@ -61,25 +61,18 @@ const register = async (req, res) => {
     status: ACCOUNT_STATUS.PENDING_VERIFICATION
   });
 
-  // Send verification email
-  try {
-    await emailService.sendOTPEmail(email, otp, 'verification');
-  } catch (error) {
-    console.error('Failed to send verification email:', error);
-    // Don't fail registration if email fails
-  }
+  // Send verification email (don't await - send in background)
+  emailService.sendOTPEmail(email, otp, 'verification')
+    .catch(error => console.error('Failed to send verification email:', error));
 
   // Generate tokens
   const tokens = jwtService.generateTokens(user);
 
-  // Update user with refresh token
-  user.refreshToken = tokens.refreshToken;
-  await user.save({ validateBeforeSave: false });
-
-  // Remove sensitive data
-  user.password = undefined;
-  user.otp = undefined;
-  user.refreshToken = undefined;
+  // Update user with refresh token using updateOne to avoid triggering pre-save hooks
+  await User.updateOne(
+    { _id: user._id },
+    { $set: { refreshToken: tokens.refreshToken } }
+  );
 
   return createdResponse(res, {
     message: 'Registration successful. Please verify your email.',
@@ -124,10 +117,16 @@ const login = async (req, res) => {
   // Generate tokens
   const tokens = jwtService.generateTokens(user);
 
-  // Update user
-  user.refreshToken = tokens.refreshToken;
-  user.lastLogin = new Date();
-  await user.save({ validateBeforeSave: false });
+  // Update user using updateOne to avoid triggering pre-save hooks
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        refreshToken: tokens.refreshToken,
+        lastLogin: new Date()
+      }
+    }
+  );
 
   return successResponse(res, {
     message: 'Login successful',
@@ -158,7 +157,7 @@ const verifyEmail = async (req, res) => {
   const { email, otp } = req.body;
 
   const user = await User.findOne({ email });
-  
+
   if (!user) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.USER_NOT_FOUND]);
   }
@@ -179,23 +178,28 @@ const verifyEmail = async (req, res) => {
 
   // Verify OTP
   if (user.otp.code !== otp) {
-    user.otp.attempts += 1;
-    await user.save({ validateBeforeSave: false });
+    await User.updateOne(
+      { _id: user._id },
+      { $inc: { 'otp.attempts': 1 } }
+    );
     throw new ValidationError(ERROR_MESSAGES[ERROR_CODES.OTP_INVALID]);
   }
 
-  // Update user
-  user.isEmailVerified = true;
-  user.status = ACCOUNT_STATUS.ACTIVE;
-  user.otp = undefined;
-  await user.save({ validateBeforeSave: false });
+  // Update user using updateOne
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        isEmailVerified: true,
+        status: ACCOUNT_STATUS.ACTIVE
+      },
+      $unset: { otp: 1 }
+    }
+  );
 
-  // Send welcome email
-  try {
-    await emailService.sendWelcomeEmail(user.email, user.firstName);
-  } catch (error) {
-    console.error('Failed to send welcome email:', error);
-  }
+  // Send welcome email (don't await - send in background)
+  emailService.sendWelcomeEmail(user.email, user.firstName)
+    .catch(error => console.error('Failed to send welcome email:', error));
 
   return successResponse(res, {
     message: 'Email verified successfully'
@@ -211,7 +215,7 @@ const resendOTP = async (req, res) => {
   const { email } = req.body;
 
   const user = await User.findOne({ email });
-  
+
   if (!user) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.USER_NOT_FOUND]);
   }
@@ -223,12 +227,19 @@ const resendOTP = async (req, res) => {
   // Generate new OTP
   const otp = generateOTP();
 
-  user.otp = {
-    code: otp,
-    expiresAt: calculateOTPExpiry(),
-    attempts: 0
-  };
-  await user.save({ validateBeforeSave: false });
+  // Update user with new OTP using updateOne
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        otp: {
+          code: otp,
+          expiresAt: calculateOTPExpiry(),
+          attempts: 0
+        }
+      }
+    }
+  );
 
   // Send OTP email
   await emailService.sendOTPEmail(email, otp, 'verification');
@@ -247,7 +258,7 @@ const forgotPassword = async (req, res) => {
   const { email } = req.body;
 
   const user = await User.findOne({ email });
-  
+
   if (!user) {
     // Don't reveal if email exists
     return successResponse(res, {
@@ -258,12 +269,19 @@ const forgotPassword = async (req, res) => {
   // Generate OTP
   const otp = generateOTP();
 
-  user.otp = {
-    code: otp,
-    expiresAt: calculateOTPExpiry(),
-    attempts: 0
-  };
-  await user.save({ validateBeforeSave: false });
+  // Update user with OTP using updateOne
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        otp: {
+          code: otp,
+          expiresAt: calculateOTPExpiry(),
+          attempts: 0
+        }
+      }
+    }
+  );
 
   // Send OTP email
   await emailService.sendOTPEmail(email, otp, 'password_reset');
@@ -281,8 +299,8 @@ const forgotPassword = async (req, res) => {
 const resetPassword = async (req, res) => {
   const { email, otp, newPassword } = req.body;
 
-  const user = await User.findOne({ email });
-  
+  const user = await User.findOne({ email }).select('+password');
+
   if (!user) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.USER_NOT_FOUND]);
   }
@@ -299,23 +317,28 @@ const resetPassword = async (req, res) => {
 
   // Verify OTP
   if (user.otp.code !== otp) {
-    user.otp.attempts += 1;
-    await user.save({ validateBeforeSave: false });
+    await User.updateOne(
+      { _id: user._id },
+      { $inc: { 'otp.attempts': 1 } }
+    );
     throw new ValidationError(ERROR_MESSAGES[ERROR_CODES.OTP_INVALID]);
   }
 
-  // Update password
+  // Update password - this will trigger pre-save hook to hash the password
   user.password = newPassword;
-  user.otp = undefined;
-  user.refreshToken = undefined; // Invalidate all sessions
   await user.save();
 
-  // Send confirmation email
-  try {
-    await emailService.sendPasswordResetSuccessEmail(user.email, user.firstName);
-  } catch (error) {
-    console.error('Failed to send password reset confirmation email:', error);
-  }
+  // Clear OTP and refresh token using updateOne
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $unset: { otp: 1, refreshToken: 1 }
+    }
+  );
+
+  // Send confirmation email (don't await - send in background)
+  emailService.sendPasswordResetSuccessEmail(user.email, user.firstName)
+    .catch(error => console.error('Failed to send password reset confirmation email:', error));
 
   return successResponse(res, {
     message: 'Password reset successful. Please login with your new password.'
@@ -338,15 +361,16 @@ const changePassword = async (req, res) => {
     throw new AuthenticationError('Current password is incorrect');
   }
 
-  // Update password
+  // Update password - this will trigger pre-save hook to hash the password
   user.password = newPassword;
-  user.refreshToken = undefined; // Invalidate all sessions
   await user.save();
 
-  // Generate new tokens
+  // Generate new tokens and update refresh token
   const tokens = jwtService.generateTokens(user);
-  user.refreshToken = tokens.refreshToken;
-  await user.save({ validateBeforeSave: false });
+  await User.updateOne(
+    { _id: user._id },
+    { $set: { refreshToken: tokens.refreshToken } }
+  );
 
   return successResponse(res, {
     message: 'Password changed successfully',
@@ -367,7 +391,7 @@ const refreshToken = async (req, res) => {
 
   // Find user
   const user = await User.findById(decoded.id);
-  
+
   if (!user) {
     throw new AuthenticationError('User not found');
   }
@@ -380,9 +404,11 @@ const refreshToken = async (req, res) => {
   // Generate new tokens
   const tokens = jwtService.generateTokens(user);
 
-  // Update refresh token
-  user.refreshToken = tokens.refreshToken;
-  await user.save({ validateBeforeSave: false });
+  // Update refresh token using updateOne
+  await User.updateOne(
+    { _id: user._id },
+    { $set: { refreshToken: tokens.refreshToken } }
+  );
 
   return successResponse(res, {
     message: 'Token refreshed successfully',
@@ -396,9 +422,11 @@ const refreshToken = async (req, res) => {
  * @access  Private
  */
 const logout = async (req, res) => {
-  // Clear refresh token
-  req.user.refreshToken = undefined;
-  await req.user.save({ validateBeforeSave: false });
+  // Clear refresh token using updateOne
+  await User.updateOne(
+    { _id: req.user._id },
+    { $unset: { refreshToken: 1 } }
+  );
 
   return successResponse(res, {
     message: 'Logged out successfully'
@@ -443,7 +471,7 @@ const otpLogin = async (req, res) => {
   const { email, otp } = req.body;
 
   const user = await User.findOne({ email });
-  
+
   if (!user) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.USER_NOT_FOUND]);
   }
@@ -465,19 +493,27 @@ const otpLogin = async (req, res) => {
 
   // Verify OTP
   if (user.otp.code !== otp) {
-    user.otp.attempts += 1;
-    await user.save({ validateBeforeSave: false });
+    await User.updateOne(
+      { _id: user._id },
+      { $inc: { 'otp.attempts': 1 } }
+    );
     throw new ValidationError(ERROR_MESSAGES[ERROR_CODES.OTP_INVALID]);
   }
 
-  // Clear OTP and update user
-  user.otp = undefined;
-  user.lastLogin = new Date();
-  
   // Generate tokens
   const tokens = jwtService.generateTokens(user);
-  user.refreshToken = tokens.refreshToken;
-  await user.save({ validateBeforeSave: false });
+
+  // Clear OTP and update user using updateOne
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $unset: { otp: 1 },
+      $set: {
+        refreshToken: tokens.refreshToken,
+        lastLogin: new Date()
+      }
+    }
+  );
 
   return successResponse(res, {
     message: 'Login successful',
@@ -507,7 +543,7 @@ const requestLoginOTP = async (req, res) => {
   const { email } = req.body;
 
   const user = await User.findOne({ email });
-  
+
   if (!user) {
     // Don't reveal if email exists
     return successResponse(res, {
@@ -518,12 +554,19 @@ const requestLoginOTP = async (req, res) => {
   // Generate OTP
   const otp = generateOTP();
 
-  user.otp = {
-    code: otp,
-    expiresAt: calculateOTPExpiry(),
-    attempts: 0
-  };
-  await user.save({ validateBeforeSave: false });
+  // Update user with OTP using updateOne
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        otp: {
+          code: otp,
+          expiresAt: calculateOTPExpiry(),
+          attempts: 0
+        }
+      }
+    }
+  );
 
   // Send OTP email
   await emailService.sendOTPEmail(email, otp, 'login');
