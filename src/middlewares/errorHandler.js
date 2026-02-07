@@ -77,7 +77,7 @@ const sendErrorProd = (err, res) => {
 
   // Programming or unknown error: don't leak error details
   console.error('ERROR 💥:', err);
-  
+
   return errorResponse(res, {
     statusCode: 500,
     message: 'Something went wrong. Please try again later.',
@@ -109,9 +109,10 @@ const errorHandler = (err, req, res, next) => {
     error.name = err.name;
 
     // Handle specific error types
+    // Only handle Mongoose ValidationError, not our custom ValidationError
     if (err.name === 'CastError') error = handleCastError(err);
     if (err.code === 11000) error = handleDuplicateKeyError(err);
-    if (err.name === 'ValidationError') error = handleValidationError(err);
+    if (err.name === 'ValidationError' && !err.isOperational) error = handleValidationError(err);
     if (err.name === 'JsonWebTokenError') error = handleJWTError();
     if (err.name === 'TokenExpiredError') error = handleJWTExpiredError();
 
