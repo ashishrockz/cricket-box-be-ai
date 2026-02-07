@@ -48,7 +48,7 @@ Cricket Box is a comprehensive digital platform for organizing, playing, officia
     },
     servers: [
       {
-        url: 'http://localhost:5000',
+        url: 'http://localhost:3000',
         description: 'Development server'
       },
       {

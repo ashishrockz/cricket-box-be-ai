@@ -104,9 +104,7 @@ const errorHandler = (err, req, res, next) => {
   if (process.env.NODE_ENV === 'development') {
     sendErrorDev(err, res);
   } else {
-    let error = { ...err };
-    error.message = err.message;
-    error.name = err.name;
+    let error = err;
 
     // Handle specific error types
     // Only handle Mongoose ValidationError, not our custom ValidationError
