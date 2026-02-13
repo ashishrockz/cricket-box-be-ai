@@ -483,6 +483,190 @@ const forceRemoveFriendshipValidation = [
   validate
 ];
 
+// ==================== NOTIFICATION VALIDATIONS ====================
+
+const sendCustomNotificationValidation = [
+  body('recipientIds')
+    .isArray({ min: 1, max: 50 })
+    .withMessage('recipientIds must be an array with 1-50 user IDs'),
+
+  body('recipientIds.*')
+    .isMongoId()
+    .withMessage('Each recipientId must be a valid MongoDB ID'),
+
+  body('title')
+    .trim()
+    .notEmpty().withMessage('Title is required')
+    .isLength({ max: 100 })
+    .withMessage('Title cannot exceed 100 characters'),
+
+  body('message')
+    .trim()
+    .notEmpty().withMessage('Message is required')
+    .isLength({ max: 500 })
+    .withMessage('Message cannot exceed 500 characters'),
+
+  body('priority')
+    .optional()
+    .isIn(['low', 'normal', 'high', 'urgent'])
+    .withMessage('Priority must be one of: low, normal, high, urgent'),
+
+  body('richContent.imageUrl')
+    .optional()
+    .trim()
+    .isURL().withMessage('Image URL must be a valid URL')
+    .matches(/\.(jpg|jpeg|png|gif|webp)$/i)
+    .withMessage('Image URL must end with a valid image extension'),
+
+  body('richContent.iconUrl')
+    .optional()
+    .trim()
+    .isURL().withMessage('Icon URL must be a valid URL'),
+
+  body('richContent.actionButton.text')
+    .optional()
+    .trim()
+    .isLength({ max: 30 })
+    .withMessage('Action button text cannot exceed 30 characters'),
+
+  body('richContent.actionButton.link')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Action button link cannot exceed 500 characters'),
+
+  body('richContent.deepLink')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Deep link cannot exceed 500 characters'),
+
+  validate
+];
+
+const sendBroadcastNotificationValidation = [
+  body('title')
+    .trim()
+    .notEmpty().withMessage('Title is required')
+    .isLength({ max: 100 })
+    .withMessage('Title cannot exceed 100 characters'),
+
+  body('message')
+    .trim()
+    .notEmpty().withMessage('Message is required')
+    .isLength({ max: 500 })
+    .withMessage('Message cannot exceed 500 characters'),
+
+  body('priority')
+    .optional()
+    .isIn(['low', 'normal', 'high', 'urgent'])
+    .withMessage('Priority must be one of: low, normal, high, urgent'),
+
+  body('targeting')
+    .optional()
+    .isObject()
+    .withMessage('Targeting must be an object'),
+
+  body('targeting.all')
+    .optional()
+    .isBoolean()
+    .withMessage('targeting.all must be a boolean'),
+
+  body('targeting.role')
+    .optional()
+    .isIn(['admin', 'host', 'player', 'umpire', 'viewer'])
+    .withMessage('Invalid role in targeting'),
+
+  body('targeting.userIds')
+    .optional()
+    .isArray({ max: 1000 })
+    .withMessage('targeting.userIds must be an array with max 1000 IDs'),
+
+  validate
+];
+
+const updatePreferencesValidation = [
+  body('enabled')
+    .optional()
+    .isBoolean()
+    .withMessage('enabled must be a boolean'),
+
+  body('categories')
+    .optional()
+    .isObject()
+    .withMessage('categories must be an object'),
+
+  body('categories.friend')
+    .optional()
+    .isBoolean()
+    .withMessage('categories.friend must be a boolean'),
+
+  body('categories.match')
+    .optional()
+    .isBoolean()
+    .withMessage('categories.match must be a boolean'),
+
+  body('categories.room')
+    .optional()
+    .isBoolean()
+    .withMessage('categories.room must be a boolean'),
+
+  body('categories.custom')
+    .optional()
+    .isBoolean()
+    .withMessage('categories.custom must be a boolean'),
+
+  body('categories.system')
+    .optional()
+    .isBoolean()
+    .withMessage('categories.system must be a boolean'),
+
+  body('doNotDisturb.enabled')
+    .optional()
+    .isBoolean()
+    .withMessage('doNotDisturb.enabled must be a boolean'),
+
+  body('doNotDisturb.startTime')
+    .optional()
+    .trim()
+    .matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+    .withMessage('startTime must be in HH:mm format (24-hour)'),
+
+  body('doNotDisturb.endTime')
+    .optional()
+    .trim()
+    .matches(/^([01]\d|2[0-3]):([0-5]\d)$/)
+    .withMessage('endTime must be in HH:mm format (24-hour)'),
+
+  body('emailNotifications')
+    .optional()
+    .isBoolean()
+    .withMessage('emailNotifications must be a boolean'),
+
+  body('pushNotifications')
+    .optional()
+    .isBoolean()
+    .withMessage('pushNotifications must be a boolean'),
+
+  validate
+];
+
+const getFilteredNotificationsValidation = [
+  query('categories')
+    .optional()
+    .trim()
+    .matches(/^(friend|match|room|system|custom|admin)(,(friend|match|room|system|custom|admin))*$/)
+    .withMessage('categories must be comma-separated values from: friend, match, room, system, custom, admin'),
+
+  query('priorities')
+    .optional()
+    .trim()
+    .matches(/^(low|normal|high|urgent)(,(low|normal|high|urgent))*$/)
+    .withMessage('priorities must be comma-separated values from: low, normal, high, urgent'),
+
+  validate
+];
+
 // ==================== COMMON VALIDATIONS ====================
 
 const mongoIdValidation = (paramName = 'id') => [
@@ -540,6 +724,11 @@ module.exports = {
   sendFriendRequestValidation,
   blockUserValidation,
   forceRemoveFriendshipValidation,
+  // Notification
+  sendCustomNotificationValidation,
+  sendBroadcastNotificationValidation,
+  updatePreferencesValidation,
+  getFilteredNotificationsValidation,
   // Common
   mongoIdValidation,
   paginationValidation

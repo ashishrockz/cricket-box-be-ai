@@ -1,8 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const { notificationController } = require('../controllers');
-const { catchAsync, authenticate } = require('../middlewares');
-const { mongoIdValidation, paginationValidation } = require('../validators');
+const { catchAsync, authenticate, isAdmin } = require('../middlewares');
+const {
+  mongoIdValidation,
+  paginationValidation,
+  sendCustomNotificationValidation,
+  sendBroadcastNotificationValidation,
+  updatePreferencesValidation,
+  getFilteredNotificationsValidation
+} = require('../validators');
+const {
+  customNotificationLimiter,
+  broadcastNotificationLimiter
+} = require('../middlewares/rateLimiter');
 
 // All notification routes require authentication
 router.use(authenticate);
@@ -13,6 +24,116 @@ router.use(authenticate);
  *   name: Notifications
  *   description: Notification management endpoints
  */
+
+// ========== PREFERENCE ROUTES ==========
+
+/**
+ * @swagger
+ * /api/v1/notifications/preferences:
+ *   get:
+ *     summary: Get notification preferences
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Notification preferences
+ */
+router.get('/preferences', catchAsync(notificationController.getPreferences));
+
+/**
+ * @swagger
+ * /api/v1/notifications/preferences:
+ *   patch:
+ *     summary: Update notification preferences
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Preferences updated
+ */
+router.patch(
+  '/preferences',
+  updatePreferencesValidation,
+  catchAsync(notificationController.updatePreferences)
+);
+
+// ========== CUSTOM & BROADCAST ROUTES ==========
+
+/**
+ * @swagger
+ * /api/v1/notifications/custom:
+ *   post:
+ *     summary: Send custom notification to friends
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: Custom notification sent
+ */
+router.post(
+  '/custom',
+  customNotificationLimiter,
+  sendCustomNotificationValidation,
+  catchAsync(notificationController.sendCustomNotification)
+);
+
+/**
+ * @swagger
+ * /api/v1/notifications/broadcast:
+ *   post:
+ *     summary: Send broadcast notification (Admin only)
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: Broadcast sent
+ */
+router.post(
+  '/broadcast',
+  isAdmin,
+  broadcastNotificationLimiter,
+  sendBroadcastNotificationValidation,
+  catchAsync(notificationController.sendBroadcastNotification)
+);
+
+// ========== QUERY ROUTES ==========
+
+/**
+ * @swagger
+ * /api/v1/notifications/filtered:
+ *   get:
+ *     summary: Get filtered notifications by category and priority
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Filtered notifications
+ */
+router.get(
+  '/filtered',
+  paginationValidation,
+  getFilteredNotificationsValidation,
+  catchAsync(notificationController.getFilteredNotifications)
+);
+
+/**
+ * @swagger
+ * /api/v1/notifications/unread-count:
+ *   get:
+ *     summary: Get unread notifications count
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Unread count
+ */
+router.get('/unread-count', catchAsync(notificationController.getUnreadCount));
 
 /**
  * @swagger
@@ -47,31 +168,7 @@ router.use(authenticate);
  */
 router.get('/', paginationValidation, catchAsync(notificationController.getNotifications));
 
-/**
- * @swagger
- * /api/v1/notifications/unread-count:
- *   get:
- *     summary: Get unread notifications count
- *     tags: [Notifications]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Unread count
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: object
- *                   properties:
- *                     unreadCount:
- *                       type: integer
- */
-router.get('/unread-count', catchAsync(notificationController.getUnreadCount));
+// ========== UPDATE ROUTES ==========
 
 /**
  * @swagger
@@ -109,6 +206,28 @@ router.patch('/read-all', catchAsync(notificationController.markAllAsRead));
  *         description: Notification not found
  */
 router.patch('/:notificationId/read', mongoIdValidation('notificationId'), catchAsync(notificationController.markAsRead));
+
+/**
+ * @swagger
+ * /api/v1/notifications/{notificationId}/viewed:
+ *   patch:
+ *     summary: Mark notification as viewed
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: notificationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Notification marked as viewed
+ */
+router.patch('/:notificationId/viewed', mongoIdValidation('notificationId'), catchAsync(notificationController.markAsViewed));
+
+// ========== DELETE ROUTES ==========
 
 /**
  * @swagger

@@ -31,7 +31,7 @@ const register = async (req, res) => {
   const { username, email, password, firstName, lastName, phone } = req.body;
 
   // Check if email already exists
-  const existingEmail = await User.findOne({ email });
+  const existingEmail = await User.findOne({ email: email.toLowerCase() });
   if (existingEmail) {
     throw new ConflictError(ERROR_MESSAGES[ERROR_CODES.EMAIL_ALREADY_EXISTS]);
   }
@@ -156,7 +156,7 @@ const login = async (req, res) => {
 const verifyEmail = async (req, res) => {
   const { email, otp } = req.body;
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email: email.toLowerCase() });
 
   if (!user) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.USER_NOT_FOUND]);
@@ -214,7 +214,7 @@ const verifyEmail = async (req, res) => {
 const resendOTP = async (req, res) => {
   const { email } = req.body;
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email: email.toLowerCase() });
 
   if (!user) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.USER_NOT_FOUND]);
@@ -257,7 +257,7 @@ const resendOTP = async (req, res) => {
 const forgotPassword = async (req, res) => {
   const { email } = req.body;
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email: email.toLowerCase() });
 
   if (!user) {
     // Don't reveal if email exists
@@ -299,7 +299,7 @@ const forgotPassword = async (req, res) => {
 const resetPassword = async (req, res) => {
   const { email, otp, newPassword } = req.body;
 
-  const user = await User.findOne({ email }).select('+password');
+  const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
 
   if (!user) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.USER_NOT_FOUND]);
@@ -470,7 +470,7 @@ const getMe = async (req, res) => {
 const otpLogin = async (req, res) => {
   const { email, otp } = req.body;
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email: email.toLowerCase() });
 
   if (!user) {
     throw new NotFoundError(ERROR_MESSAGES[ERROR_CODES.USER_NOT_FOUND]);
@@ -542,7 +542,7 @@ const otpLogin = async (req, res) => {
 const requestLoginOTP = async (req, res) => {
   const { email } = req.body;
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email: email.toLowerCase() });
 
   if (!user) {
     // Don't reveal if email exists

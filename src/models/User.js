@@ -174,7 +174,34 @@ const userSchema = new mongoose.Schema({
   blockedBy: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-  }]
+  }],
+  // Notification Preferences
+  notificationPreferences: {
+    enabled: {
+      type: Boolean,
+      default: true
+    },
+    categories: {
+      friend: { type: Boolean, default: true },
+      match: { type: Boolean, default: true },
+      room: { type: Boolean, default: true },
+      custom: { type: Boolean, default: true },
+      system: { type: Boolean, default: true }
+    },
+    doNotDisturb: {
+      enabled: { type: Boolean, default: false },
+      startTime: String,  // "HH:mm" format (24-hour)
+      endTime: String     // "HH:mm" format (24-hour)
+    },
+    emailNotifications: {
+      type: Boolean,
+      default: false
+    },
+    pushNotifications: {
+      type: Boolean,
+      default: true
+    }
+  }
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
@@ -193,6 +220,8 @@ userSchema.index({ friends: 1 });
 userSchema.index({ 'incomingFriendRequests.from': 1 });
 userSchema.index({ 'outgoingFriendRequests.to': 1 });
 userSchema.index({ 'blockedUsers.user': 1 });
+// Notification preferences index
+userSchema.index({ 'notificationPreferences.enabled': 1 });
 
 // Virtual for full name
 userSchema.virtual('fullName').get(function() {
@@ -316,9 +345,52 @@ userSchema.methods.hasPendingRequestTo = function(userId) {
   return this.outgoingFriendRequests.some(r => r.to.toString() === userId.toString());
 };
 
+/**
+ * Check if user can receive notification of given category
+ */
+userSchema.methods.canReceiveNotification = function(category) {
+  // Admin broadcasts always go through
+  if (category === 'admin') return true;
+
+  // Check if notifications are enabled
+  if (!this.notificationPreferences || !this.notificationPreferences.enabled) {
+    return false;
+  }
+
+  // Check category preference
+  if (this.notificationPreferences.categories &&
+      this.notificationPreferences.categories[category] === false) {
+    return false;
+  }
+
+  // Check do-not-disturb mode
+  if (this.notificationPreferences.doNotDisturb &&
+      this.notificationPreferences.doNotDisturb.enabled) {
+    const now = new Date();
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const { startTime, endTime } = this.notificationPreferences.doNotDisturb;
+
+    if (startTime && endTime) {
+      // Handle overnight DND (e.g., 22:00 to 06:00)
+      if (startTime > endTime) {
+        if (currentTime >= startTime || currentTime <= endTime) {
+          return false;
+        }
+      } else {
+        // Same-day DND (e.g., 13:00 to 14:00)
+        if (currentTime >= startTime && currentTime <= endTime) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+};
+
 // Static method to find user by credentials
 userSchema.statics.findByCredentials = async function(email, password) {
-  const user = await this.findOne({ email }).select('+password');
+  const user = await this.findOne({ email: email.toLowerCase() }).select('+password');
   
   if (!user) {
     return { user: null, error: 'INVALID_CREDENTIALS' };

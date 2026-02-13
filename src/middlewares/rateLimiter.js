@@ -98,6 +98,33 @@ const roomCreationLimiter = createRateLimiter({
   message: 'Too many rooms created, please try again later'
 });
 
+/**
+ * Custom notification rate limiter
+ * Dynamic: 20 per hour for regular users, 100 per hour for admins
+ */
+const customNotificationLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,  // 1 hour
+  max: async (req) => {
+    if (req.user && req.user.role === 'admin') {
+      return 100;
+    }
+    return 20;
+  },
+  message: 'Too many custom notifications sent. Please try again later',
+  keyGenerator: (req) => req.user ? req.user._id.toString() : req.ip
+});
+
+/**
+ * Broadcast notification rate limiter (admin only)
+ * 5 broadcasts per hour
+ */
+const broadcastNotificationLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: 'Too many broadcast notifications sent. Please try again later',
+  keyGenerator: (req) => req.user ? req.user._id.toString() : req.ip
+});
+
 module.exports = {
   createRateLimiter,
   apiLimiter,
@@ -107,5 +134,7 @@ module.exports = {
   passwordResetLimiter,
   registrationLimiter,
   scoringLimiter,
-  roomCreationLimiter
+  roomCreationLimiter,
+  customNotificationLimiter,
+  broadcastNotificationLimiter
 };

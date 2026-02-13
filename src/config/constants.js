@@ -167,6 +167,9 @@ module.exports = {
     // Notification Events
     NOTIFICATION: 'notification',
     NOTIFICATIONS_READ: 'notifications_read',
+    NOTIFICATION_VIEWED: 'notification_viewed',
+    NOTIFICATION_PREFERENCES_UPDATED: 'notification_preferences_updated',
+    BROADCAST_NOTIFICATION: 'broadcast_notification',
 
     // Friend Events
     FRIEND_REQUEST_RECEIVED: 'friend_request_received',
@@ -202,6 +205,20 @@ module.exports = {
     MATCH_STARTED: 'match_started',
     MATCH_ENDED: 'match_ended',
     ROOM_INVITATION: 'room_invitation',
-    SYSTEM: 'system'
+    SYSTEM: 'system',
+    CUSTOM: 'custom',
+    ADMIN_BROADCAST: 'admin_broadcast'
+  },
+
+  // Notification Configuration
+  NOTIFICATION_CONFIG: {
+    CUSTOM_RATE_LIMIT_WINDOW_MS: 60 * 60 * 1000,  // 1 hour
+    CUSTOM_RATE_LIMIT_USER: 20,
+    CUSTOM_RATE_LIMIT_ADMIN: 100,
+    BROADCAST_RATE_LIMIT: 5,
+    MAX_TITLE_LENGTH: 100,
+    MAX_MESSAGE_LENGTH: 500,
+    VALID_PRIORITIES: ['low', 'normal', 'high', 'urgent'],
+    VALID_CATEGORIES: ['friend', 'match', 'room', 'system', 'custom', 'admin']
   }
 };
